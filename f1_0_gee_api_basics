@@ -1,0 +1,117 @@
+/* Chapter F1.0: Javascript and the GEE API */
+/* Section 1: Intro to Earth Engine */
+
+  // GEE: cloud-based platform for RS analysis
+  // provides ready-to-use, cloud-hosted datasets
+  // and large pool of servers enabling fast runs
+  // of very large computations
+  
+  // API (application programming interface):
+  // a way to communicate w/ serves (e.g. of GEE)
+  // hides server distribution of computation
+  // and method of results assembly
+  
+  // API user just needs to tell instructions
+  // making GEE accessible to non-coders
+  
+  // GEE API is language-agnostic, providing official
+  // client libraries to use API from JavaScript & Python
+  // API is same for both languages, diff. syntax lang
+  
+  // why JavaScript? not 1st choice for data scientists
+  // compared to Python or R BUT since GEE is web-based
+  // GEE JavaScript API is easy to use, no installation needed
+  
+  // can also easily display results on map, save scripts
+  // access docs, manage tasks, share code, and more
+  // also comes w/ ui library to print charts & web apps
+  
+  // no need to be JavaScript expert to use GEE well
+  // if RS is complex in JavaScript, simpler in GEE
+  // all impt computations in GEE better use API functions
+  
+  // think: Javascript = language, GEE API = dialect?
+
+/* Section 2. JavaScript Basics */
+
+  // variable type: string (text)
+var city = 'San Francisco';
+print('City: ', city);
+
+  // variable type: number
+var population = 873965;
+print('Population: ', population);
+
+  // data structure: list
+  // a list can hold multiple values
+  // each list item assigned a numeric 'index'
+  // create list with []
+var cities = ['San Francisco', 
+              'Los Angeles', 
+              'New York', 
+              'Atlanta'];
+print(cities);
+
+  // lists not appropriate to store structured data
+  // better to be able to refer to each item
+  // by name rather than position in list
+  
+  // data structure: object (aka dictionary)
+  // stores key-value pairs
+  // each value referred to by its key (aka label)
+  // create dictionary with {}
+var cityData = {
+  'city': 'San Francisco',
+  'coordinates': [-122.4194, 37.7749],
+  'population': 873965
+};
+print('City Data: ', cityData);
+
+  // functions used in GEE to group operations together
+  // and repeat them w/ diff parameters w/o rewriting
+  // steps: take user input, compute stuff, send output
+  // functions are defined via the function() keyword
+var greet = function(name){
+  return 'Hello ' + name;
+};
+print(greet('World!'));
+print(greet('Readers!'));
+
+/* Section 3: Earth Engine API Basics */
+
+  // two numeric variables a and b
+  // can't use JavaScript methods for computations
+  // in GEE, we use API methods instead
+var a =  1;
+var b = 2;
+
+  // GEE has 'ee.Number' methods for numbers
+  // we wrap numbers a and b w/in ee.Number() object
+  // then we use ee.Number().add(b) to add b to a
+var result = ee.Number(a).add(b);
+print(result);
+
+  // GEE API functions same
+  // whether language is JavaScript or Python
+  // so no need to be coding expert
+  
+  // example #2: list of yrs (1980-2020), 5-yr interval
+  // we use ee.List methods (ee.List.sequence())
+  // ^^ creates sequence of nos., w/ optional interval
+  // start = 1980, end = 2020, step = 5
+var yearList = ee.List.sequence(1980, 2020, 5);
+print(yearList);
+
+/* Section 4: SYNTHESIS */
+
+  // define two string variables below
+var mission = ee.String('Sentinel');
+var satellite = ee.String('2A');
+
+  // use GEE API to create new string variable
+  // called 'result' by combining the two strings
+  // then print 'result' in the console
+var result = mission.cat(satellite);
+print(result);
+
+  // correct output: "Sentinel2A"

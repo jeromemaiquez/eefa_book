@@ -1,0 +1,306 @@
+/* Chapter F2.2: Accuracy Assessment */
+
+  // any map or RS product is a generalization or model
+  // and error is inherent in models/generalizations
+  // to be used for science, accuracy must be measured
+  // quantitatively to strengthen confidence in info
+  
+  // accuracy assessment: crucial part of classification
+  // measures agreement of classification w/ another
+  // data source that is considered ground-truth (reality)
+  
+  // history of accuracy assessment: increase in
+  // detail and rigor of analysis, from visual appraisal
+  // to sampling & response and accuracy metrics
+  
+  // confusion matrix (aka error matrix):
+  // summarizes key accuracy metrics of RS products
+  
+  // in accuracy assessment, we think about:
+  // sampling design, response design, and analysis
+  // uses legit protocols that require planning & time
+  
+  // in chap f2.2, we focus on last step (analysis)
+  // analyzing confusion matrix and calculating metrics
+  // by partitioning existing data into training & testing sets
+  
+/* Section 1: Confusion Matrix */
+
+  // we will revisit LULC classification near milan
+  // import featurecollection containing class values
+  // and spectral information for 4 LULC classes
+  // also define list 'predictionBands'
+  
+  // import reference dataset
+var data = ee.FeatureCollection(
+    'projects/gee-book/assets/F2-2/milan_data');
+    
+  // define prediction bands
+var predictionBands = [
+    'SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 
+    'SR_B5', 'SR_B6', 'SR_B7', 'ST_B10',
+    'ndvi', 'ndwi'
+];
+
+  // split dataset into training & testing sets
+  // classifier trained only using training set
+  // so testing set mimics data it hasnt seen before
+  // randomize collection via randomColumn()
+  // then split 80-20 training vs. testing
+var trainTest = data.randomColumn({seed: 10});  // default seed: 0
+var trainingSet = trainTest
+    .filter(ee.Filter.lt('random', 0.7));   // default split: 80-20
+var testingSet = trainTest
+    .filter(ee.Filter.gte('random', 0.7));
+    
+  // randomColumn(): creates pseudorandom numbers
+  // deterministically, allowing reproducibility
+  // default seed value is 0 (so same seq always)
+  
+  // then train RF classifier w/ 50 trees
+var RFclassifier = ee.Classifier
+    .smileRandomForest(50).train({
+    features: trainingSet,
+    classProperty: 'class',
+    inputProperties: predictionBands
+});
+
+  // CONFUSION MATRIX: describes classification quality
+  // by comparing predicted values to actual values
+  // example: binary classification (pos or neg)
+  
+  // columns: actual values (truth)
+  // rows: predicted values (classification)
+  // true pos (TP) & neg (TN): truth & class match
+  // false pos & neg (FP/FN): mismatch of two
+  
+  //    TP    FP 
+  //    FN    TN
+  
+  // we can extract ACCURACY METRICS from matrix
+  // given sample size = N....
+  
+  // 1) overall accuracy: % of data classified correctly
+    // OA = (TP+TN)/N
+  // 2) producer accuracy (aka recall)
+    // num. of correctly identified pixels in a class
+    // div. by total num. of pixels actually in that class
+    // PA = TP/(TP+FN) or TN/(TN+FP)
+  // 3) user/consumer accuracy (aka precision)
+    // num. of correctly identified pixels in a class
+    // div. by total num. of pixels classified as that class
+    // UA = TP/(TP+FP) or TN/(TN+FN)
+    
+  //      PA      |     UA    |     OA
+  //  TP      --  |  TP    FP |   TP    --
+  //  FN      --  |  --    -- |   --    TN
+  
+  // 4) omission error: 100% - PA
+    // true pixels left out of correct class
+  // 5) commission error: 100% - UA
+    // pixels assigned to the wrong class
+  
+  // 6) kappa coefficient: evaluates how well the
+  // classification performed vs. random
+    // 0 = same as random, 1 = better, -1 = worse
+    // kappa = (OA-CA)/(1-CA) (CA: chance agreement)
+    // CA = Σ(row total * column total), i = class
+  
+  // in GEE, there are API methods for these metrics
+  // our matrix is 4x4 since we have 4 classes
+  
+  // to test classification accuracy
+  // we classify testingSet then get the matrix
+var confusionMatrix = testingSet
+    .classify(RFclassifier)
+    .errorMatrix({
+        actual: 'class',
+        predicted: 'classification'
+});
+
+  // now print matrix & accuracy metrics
+  // on the diagonal: correct classifications
+  // off the diagonal: misclassifications
+print('Confusion matrix:', confusionMatrix);
+print('Overall Accuracy:', confusionMatrix.accuracy());
+print('Producers Accuracy:', confusionMatrix.producersAccuracy());
+print('Consumers Accuracy:', confusionMatrix.consumersAccuracy());
+print('Kappa:', confusionMatrix.kappa());
+
+  // expected output: moderately good classification
+  // lower metrics for developed (1) and herbaceous (3)
+  // also some confusion in water (2)
+  
+/* Section 2: Hyperparameter Tuning */
+
+  // we can also assess effect of the number
+  // of RF decision trees on classification accuracy
+  
+  // create a function that charts OA vs. trees used
+  // tests from 5 trees to 100 at increments of 5
+  
+  // create sequence from 5-100 at increments of 5
+var numTrees = ee.List.sequence(5, 100, 5);
+
+  // create function returning model accuracies
+  // w/ each succeeding no. of decision trees
+  // via map() method applied to numTrees sequence
+var accuracies = numTrees.map(function(t) {
+    var classifier = ee.Classifier
+        .smileRandomForest(t)
+        .train({
+            features: trainingSet,
+            classProperty: 'class',
+            inputProperties: predictionBands
+        });
+    return testingSet
+        .classify(classifier)
+        .errorMatrix('class', 'classification')
+        .accuracy();
+});
+
+  // print chart comparing no. of trees & OA
+  // via ui.Chart.array.values() method
+print(ui.Chart.array.values({
+    array: ee.Array(accuracies),
+    axis: 0,
+    xLabels: numTrees
+}).setOptions({
+  hAxis: {title: 'Number of Trees'},
+  vAxis: {title: 'Overall Accuracy'},
+  title: 'Accuracy per Number of Trees'
+}));
+
+  // expected output: rising chart
+  // plateaus between 70-95 trees (0.916 OA)
+  // so now 70 can be chosen as no. of trees
+  
+/* Section 3: Spatial Autocorrelation */
+
+  // also need training samples to be uncorrelated
+  // to testing samples due to spatial autocorrelation
+  // think: nearer things more related than far
+  
+  // can remove spatially autocorrelated samples
+  // by removing near samples w/ a spatial join
+  // code is in F22c checkpoint in repository
+
+  // construct spatial filter w/ distance = 1km
+var distFilter = ee.Filter.withinDistance({
+    distance: 1000,
+    leftField: '.geo',
+    rightField: '.geo',
+    maxError: 10
+    
+});
+
+  // extract points of first collection (training)
+  // that have no matches w/ second (testing)
+  // via ee.Join.inverted()
+var join = ee.Join.inverted();
+
+  // aka get training pts that are far away enough
+  // from any nearby testing points
+  // apply this join to the training set
+var trainingSet = join.apply(
+    trainingSet, testingSet, distFilter);
+    
+  // then we perform the rest of the classification
+
+  // Train the Random Forest Classifier with the trainingSet.
+var RFclassifier = ee.Classifier.smileRandomForest(50).train({
+    features: trainingSet,
+    classProperty: 'class',
+    inputProperties: predictionBands
+});
+
+  // Now, to test the classification (verify model's accuracy), 
+  // we classify the testingSet and get a confusion matrix.
+var confusionMatrix = testingSet.classify(RFclassifier)
+    .errorMatrix({
+        actual: 'class',
+        predicted: 'classification'
+    });
+ 
+  // Print the results.
+// print('Post-Spatial Filtering');
+// print('Confusion matrix:', confusionMatrix);
+// print('Overall Accuracy:', confusionMatrix.accuracy());
+// print('Producers Accuracy:', confusionMatrix.producersAccuracy());
+// print('Consumers Accuracy:', confusionMatrix.consumersAccuracy());
+// print('Kappa:', confusionMatrix.kappa());
+
+  // expected output: cos we only have few points
+  // spatial filter -> less pts -> less accurate
+  // but for bigger datasets it may work better
+  
+/* Section 4: SYNTHESIS */
+
+  // 1) test other classifiers (e.g. CART, SVM)
+  // then compare accuracy w/ RF results
+  // example 1: CART
+var CARTclassifier = ee.Classifier
+    .smileCart().train({
+    features: trainingSet,
+    classProperty: 'class',
+    inputProperties: predictionBands
+});
+
+  // classify testing dataset
+  // and create confusion matrix
+var cartMatrix = testingSet
+    .classify(CARTclassifier)
+    .errorMatrix({
+        actual: 'class',
+        predicted: 'classification'
+});
+
+  // now print accuracy metrics
+print('CART Accuracy Metrics');
+print('Confusion matrix:', cartMatrix);
+print('Overall Accuracy:', cartMatrix.accuracy());
+print('Producers Accuracy:', cartMatrix.producersAccuracy());
+print('Consumers Accuracy:', cartMatrix.consumersAccuracy());
+print('Kappa:', cartMatrix.kappa());
+
+  // expected output: lower OA & kappa
+  
+  // example 2: support vector machine (SVM)
+var SVMclassifier = ee.Classifier
+    .libsvm().train({
+    features: trainingSet,
+    classProperty: 'class',
+    inputProperties: predictionBands
+});
+
+  // classify testing dataset
+  // and create confusion matrix
+var svmMatrix = testingSet
+    .classify(SVMclassifier)
+    .errorMatrix({
+        actual: 'class',
+        predicted: 'classification'
+});
+
+  // now print accuracy metrics
+print('SVM Accuracy Metrics');
+print('Confusion matrix:', svmMatrix);
+print('Overall Accuracy:', svmMatrix.accuracy());
+print('Producers Accuracy:', svmMatrix.producersAccuracy());
+print('Consumers Accuracy:', svmMatrix.consumersAccuracy());
+print('Kappa:', svmMatrix.kappa());
+
+  // expected output: higher OA & kappa
+  // than both CART & RF (woah)
+
+  // 2) try setting diff seed in randomColumn()
+  // and check its effects on accuracy
+  
+  // change only seed: lower OA & kappa
+  // change seed & split: even lower OA & kappa
+  // onti lang ata kasi data eh
+  
+  // in real-life analysis, there are protocols
+  // to produce rigorous & transparent estimates
+  // of class accuracy & area in region
+  // for more on this, check 'for further reading'

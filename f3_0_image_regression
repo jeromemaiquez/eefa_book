@@ -1,0 +1,661 @@
+/* Chapter F3.0: Image Regression */
+
+  // REGRESSION: prediction is numerical variable
+  // vs. categorical variable for classification
+  
+  // regression: predict numerical output based
+  // on 1 or more independent variables
+  // factors: strength & nature of relationship
+  
+  // dep. var: hazard likelihood, species occurrence
+  // ind. var: bands, indices, other raster data
+
+  // veg indices -> wheat biomass (Zhou et al., 2016)
+  // canopy lidar -> bird species richness (Goetz et al., 2007)
+  // veg indices -> tree species diversity (Maeda et al., 2014)
+  
+  // standard RS regression workflow:
+  // 1) dep-var instance data collected
+  // 2) ind-var defined & collected
+  // 3) regression run to create equation
+    // that describe relation bet. dep & ind
+  // 4) [optional] using equation & ind-var layers
+    // create map of dep-var over whole area
+
+  // many different options for regression type
+  
+  // REDUCERS: methods to summarize RS data
+  // over space, time, and/or band information
+  // e.g. median: middle number in a set
+  
+  // in GEE: ee.Reducer.median (aka median())
+  // can be done by-pixel or w/ surr. pixels
+  // e.g. zonal stats: median() in reduceRegion()
+  // reducers can summarize image collections,
+  // images, lists, feature collections, etc.
+  
+  // reducers can be simple (e.g. median)
+  // or complex (e.g. linear regression)
+  // outputs: slope & intercept of line
+  // in short: REDUCERS = statistical metrics
+  
+  // in this chapter: regression of bands in 1 image
+  // later in book: time-series regression of images
+  
+/* Section 1: Linear Fit */
+
+  // linearFit(): simplest regression in GEE
+  // least-squares estimate of linear function
+  // w only 1 dep-var and only 1 ind-var
+  
+  // equation form: y = a + bx + e (error)
+  // output: strength & nature of relationship
+  
+  // example: estimate % tree cover in each pixel
+  // based on spectral characteristics (Landsat)
+  
+  // define polygon around turin, italy
+  // and center map on it
+var turin = ee.Geometry.Polygon(
+    [
+      [
+        [7.455553918110218, 45.258245019259036],
+        [7.455553918110218, 44.71237367431335],
+        [8.573412804828967, 44.71237367431335],
+        [8.573412804828967, 45.258245019259036]
+        ]
+], null, false);
+Map.centerObject(turin, 9);
+
+  // import our dependent variable
+  // MOD44B.006 Terra Veg. Yearly Global 250m
+var mod44b = ee.ImageCollection("MODIS/006/MOD44B");
+
+  // filter mod44b collection to w/in 2020
+  // pick 1st image, clip to turin, then
+  // select appropriate band (Percent_Tree_Cover)
+var percentTree2020 = mod44b
+    .filterDate('2020-01-01', '2021-01-01')
+    .first()
+    .clip(turin)
+    .select('Percent_Tree_Cover');
+
+  // print percentTree2020 to inspect info
+  // then add layer to map
+print('2020 Image', percentTree2020);
+Map.addLayer(percentTree2020, {
+    max: 100,
+    palette: ['white', 'green']
+}, 'Percent Tree Cover 2020', 0);
+
+  // import our independent variable
+  // NDVI from Landsat 8 real-time raw scenes
+var landsat8_raw = ee.ImageCollection(
+    'LANDSAT/LC08/C02/T1_RT');
+    
+  // filter landsat8_raw by date & location
+  // date: cloud-freest date (april)
+  // location: centroid of turin polygon
+var landsat8filtered = landsat8_raw
+    .filterBounds(turin.centroid({
+        'maxError': 1
+    }))
+    .filterDate('2020-04-01', '2020-4-30')
+    .first();
+  
+  // print to inspect info then
+  // add landsat 8 layer to map
+print('Landsat 8 Filtered', landsat8filtered);
+
+var vizParams = {
+    bands: ['B4', 'B3', 'B2'],
+    max: 16000
+};
+Map.addLayer(landsat8filtered,
+    vizParams,
+    'Landsat 8 Image', 0);
+  
+  // note 1: use centroid() to select images
+  // that hit center of turin polygon
+  // not just any part of the polygon
+  
+  // note 2: we used single image, but irl
+  // need to make cloud-free composite out of
+  // image collection filtered by date & loc
+  // see Chap F4.3 for more on clouds
+  
+  // use landsat bands to calculate NDVI
+  // which we use as independent variable
+var ndvi = landsat8filtered
+    .normalizedDifference(['B5', 'B4']);
+
+  // now we assemble data into correct format
+  // creating single image w/ 2 bands
+  // band 1: ind-var (ndvi), 2: dep-var (tree cover)
+var trainingImage = ndvi.addBands(percentTree2020);
+print('Training Image for Linear Fit', trainingImage);
+
+  // now we set-up & run linear fit regression
+  // using linear fit reducer over geometry
+  // use reduceRegion() to sample pts from geometry
+  // also included: scale = 30m (Landsat)
+  // ind-var first, dep-var second
+var linearFit = trainingImage.reduceRegion({
+    reducer: ee.Reducer.linearFit(),
+    geometry: turin,
+    scale: 30,
+    bestEffort: true
+});
+
+  // inspect results
+  // 'offset': y-intercept, 'scale': slope
+print('OLS estimates:', linearFit);
+// print('y-intercept:', linearFit.get('offset'));
+// print('Slope:', linearFit.get('scale'));
+
+  // bestEffort: what does it mean?
+  // w/o bestEffort=true, error will occur
+  // ^ "too many pixels in the region"
+  // default maxPixels limit in GEE: 10 million
+  
+  // GEE can do this, but it is ensuring that
+  // novice user intends to do this operation
+  // 5 ways to resolve the error:
+    // 1) increase maxPixels
+    // 2) aggregate over lower pixel size
+    // 3) set bestEffort=true, which tells
+      // reducer to use highest resolution
+      // aka smallest pixel size
+      // w/o going over maxPixels limit
+    // 4) make area of region smaller
+    // 5) randomly sample image stack instead
+      // to control no. of samples used
+      // then reduce via reduceColumns()
+  
+  // now, apply regression to whole NDVI area
+  // which is larger than turin polygon
+  // done via expression(), explained in Chap F3.1
+  // output: prediction of tree cover over whole image
+var predictedTree = ndvi.expression(
+    'intercept + slope * ndvi', {
+        'ndvi': ndvi.select('nd'),
+        'intercept': ee.Number(linearFit.get('offset')),
+        'slope': ee.Number(linearFit.get('scale'))
+    });
+  
+  // print predictedTree to inspect
+print('Predicted Tree Cover', predictedTree);
+
+  // display results on map
+Map.addLayer(predictedTree, {
+    max: 100,
+    palette: ['white', 'green']
+}, 'Predicted Percent Tree Cover', 0);
+
+  // output: NDVI higher-res than MODIS data
+  // cos Landsat = 30m, MODIS = 500m (?)
+  // %tree cover of agri areas in NDVI higher
+  // cos NDVI doesn't separate trees & other veg
+  
+/* Section 2: Linear Regression */
+
+  // linear regression reducer allows us to
+  // increase no. of dep- and ind-vars
+  // vs. linear fit na ONLY 1 of each lang
+  
+  // we try to improve our % tree cover model
+  // by using Landsat bands (vs. NDVI only)
+  // dep-var is still only percentTree
+
+  // assemble independent variables
+var predictionBands = ['B1', 'B2', 'B3',
+    'B4', 'B5', 'B6', 'B7', 'B10', 'B11'];
+
+  // assemble data for linear regression
+  // regression needs constant term so we
+  // use ee.Image to create image w/ value=1
+  // we stack this w/ landsat bands & dep-var
+var trainingImageLR = ee.Image(1)
+    .addBands(landsat8filtered.select(predictionBands))
+    .addBands(percentTree2020);
+    
+  // print to inspect to ensure layers:
+  // 1) constant term, 2) ind-var, 3) dep-var
+print('Linear Regression Training Image',
+  trainingImageLR);
+  
+  // now we run linear regression via reducer
+  // ee.Reducer.linearRegression, which needs
+  // to know x no. of ind-var & y no. of dep-var
+  // ind-var expected to be listed first
+var linearRegression = trainingImageLR.reduceRegion({
+    reducer: ee.Reducer.linearRegression({
+        numX: 10,
+        numY: 1
+    }),
+    geometry: turin,
+    scale: 30,
+    bestEffort: true
+});
+
+  // note: we use reduceRegion() vs. reduce()
+  // to aggregate many pixels over polygon
+  // vs aggregate thru bands or image collection
+  // also, bestEffort=true to resolve error
+  
+  // there is also robust linear regression reducer
+  // ee.Reducer.robustLinearRegression
+  // to de-weight outliers using residuals
+  
+  // print to inspect results of regression
+print('Linear Regression Results:',
+  linearRegression);
+  
+  // output: object w/ 2 properties
+  // 1) list of coefficients (ordered by ind-var)
+  // 2) root-mean-square residual (error ata)
+  
+  // before applying regression coefficients
+  // to make predictions over whole image
+  // we need to turn coefficients into image
+  // then perform the necessary math
+  
+  // extract coefficients from linear regression object
+  // and turn it into a list
+  // use project() to remove 1 matrix axis
+  // to ensure data format is correct
+  // ^ i think cos each item is a matrix?
+var coefficients = ee.Array(linearRegression.get('coefficients'))
+    .project([0])
+    .toList();
+  
+  // now we predict tree cover based on
+  // results of linear regression
+  
+  // 1) create image w/ constant value = 1
+  // 2) addBands() to add ind-var bands
+  // 3) multiply() each band to coefficients
+  // 4) ee.Reducer.sum() = estimate of dep-var
+  // 5) rename dep-var (cos default:'sum')
+var predictedTreeLR = ee.Image(1)
+    .addBands(landsat8filtered.select(predictionBands))
+    .multiply(ee.Image.constant(coefficients))
+    .reduce(ee.Reducer.sum())
+    .rename('predictedTreeLR')
+    .clip(landsat8filtered.geometry());
+    
+  // bonus: inspect coefficients image
+print('LR Coefficients:',
+    ee.Image.constant(coefficients));
+    
+  // add prediction layer to map
+Map.addLayer(predictedTreeLR, {
+      min: 0,
+      max: 100,
+      palette: ['white', 'green']
+}, 'LR Prediction', 0);
+  
+  // output: better prediction than linear fit
+  // differentiates forest & agricultural areas
+  // error: effect of aspect on reflectance
+  // hence need for topographic correction
+  
+  // ways to resolve model errors:
+  // 1) add/subtract independent variables
+  // 2) testing other regression functions
+  // 3) collecting more training data
+  // 4) do all of the above LOL
+  
+/* Section 3: Nonlinear Regression */
+
+  // GEE also allows nonlinear regression
+  // which models nonlinear relationships
+  // between predictor & output variables
+  
+  // performed using ee.Classifier library
+  // vs. linear regression via ee.Reducer
+  // ee.Classifier library also includes
+  // sup. & unsup classification techniques
+  // and accuracy assessment methods in Chap F2
+  
+  // e.g. CART: ML algorithm which can
+  // learn nonlinear patterns in data
+  // let's reuse our dep- & ind-var to train CART
+  
+  // CART needs input data as feature collection
+  // see part f5 for more on feature collections
+  // first, we create training data set
+  // w/ ind-var & dep-var (NO CONSTANT TERM)
+var trainingImageCART =
+ee.Image(landsat8filtered.select(predictionBands))
+    .addBands(percentTree2020);
+
+  // now sample image stack to create
+  // training data as feature collection
+var trainingData = trainingImageCART.sample({
+    region: turin,
+    scale: 30,
+    numPixels: 1500,
+    seed: 5
+});
+
+  // we could also use this approach
+  // aka sample image stack, then use
+  // feature collection as training data
+  // via reduceColumns() function
+  
+  // ^^ instead of having to set
+  // bestEffort=true in reduceRegion()
+  
+  // examine CART training data
+print('CART training data', trainingData);
+
+  // now run the CART regression
+  // by using setOutputMode('REGRESSION')
+  // CART must 1st be trained w/ trainingData
+  
+  // for train() function, we need to provide:
+  // 1) features to use to train (trainingData)
+  // 2) name of dependent variable (classProperty)
+  // 3) name of ind-vars (inputProperties)
+  // band names can be found via printing
+
+var cartRegression = ee.Classifier.smileCart()
+    .setOutputMode('REGRESSION')
+    .train({
+        features: trainingData,
+        classProperty: 'Percent_Tree_Cover',
+        inputProperties: predictionBands
+});
+
+  // now we can predict in whole image
+  // then display the results
+var cartRegressionImage = landsat8filtered
+    .select(predictionBands)
+    .classify(cartRegression, 'cartRegression');
+
+Map.addLayer(cartRegressionImage, {
+    min: 0,
+    max: 100,
+    palette: ['white', 'green']
+}, 'CART Regression', 0);
+
+/* Section 4: Assessing Regression
+   Performance using RMSE */
+
+  // root-mean square error (RMSE):
+  // standard measure of regression performance
+  // sqrt(Σ(((predicted_i - actual_i)^2)/n))
+  
+  // step 1: create sample from dep-var (tree cover)
+  // and each ind-var (3 regression outputs)
+  
+  // by using ee.Image.cat to combine all layers
+  // into single multi-band image
+  // then rename each band into meaningful name
+var concat = ee.Image.cat(
+        percentTree2020,
+        predictedTree,
+        predictedTreeLR,
+        cartRegressionImage)
+    .rename([
+        'TCpercent',
+        'LFprediction',
+        'LRprediction',
+        'CARTprediction'
+    ]);
+
+  // then sample 500 pts from this image
+  // using sample() function
+var sample = concat.sample({
+    region: turin,
+    scale: 30,
+    numPixels: 500,
+    seed: 5
+});
+
+  // print 1st feature from sample collection
+  // to inspect properties (aka band values)
+print('First Feature in Sample', sample.first());
+
+  // in GEE, RMSE can be calculated by steps
+  // we 1st define function to calculated
+  // squared diff. bet. predicted & actual
+  // for each regression layer per feature
+  
+  // predicted = each regression layer
+  // actual = TCpercent value from MODIS
+var calculateDiff = function(feature){
+    var TCpercent = ee.Number(feature.get('TCpercent'));
+    
+    var diffLFsq = ee.Number(feature.get('LFprediction'))
+        .subtract(TCpercent).pow(2);
+    var diffLRsq = ee.Number(feature.get('LRprediction'))
+        .subtract(TCpercent).pow(2);
+    var diffCARTsq = ee.Number(feature.get('CARTprediction'))
+        .subtract(TCpercent).pow(2);
+        
+      // return feature w/ squared difference
+      // set to a 'diff' property
+    return feature.set({
+        'diffLFsq': diffLFsq,
+        'diffLRsq': diffLRsq,
+        'diffCARTsq': diffCARTsq
+    });
+};
+
+  // bonus: create list of names
+  // for RMSE value of each regression type
+  // to use as keys for RMSE values
+  // then ee.Dictionary.fromLists
+  // to combine keys & values into one dictionary
+var keys = [
+    'linearFit_rmse',
+    'linearReg_rmse',
+    'CARTReg_rmse'];
+
+  // now we can apply function to sample
+  // then use reduceColumns() function to
+  // take mean value of squared differences
+    // divide squared diff by n then sum? or
+    // sum squared diff then divide by n?
+  // then calculate square root of mean value
+var rmse = ee.List([ee.Number(
+      // map difference function over collection
+    sample.map(calculateDiff)
+      // reduce to get mean squared difference
+      // use repeat(3) to do 3x over 3 reg layers
+    .reduceColumns({
+        reducer: ee.Reducer.mean().repeat(3),
+        selectors: ['diffLFsq',
+                    'diffLRsq',
+                    'diffCARTsq'
+        ]
+    }).get('mean')
+      // flatten list of lists
+)]).flatten().map(function(i){
+      // take square root of
+      // mean square differences
+    return ee.Number(i).sqrt();
+});
+
+  // combine lists of keys & rmse values
+  // into one dictionary
+var rmseDict = ee.Dictionary
+    .fromLists(keys, rmse);
+
+  // print result of RMSE calculation
+  // expected output: list of RMSE values
+  // per regression type (lower = better)
+print('RMSE', rmseDict); 
+  // default: print rmse instead of rmseDict
+
+  // explanation of RMSE calculation code
+  
+  // 1) we cast ee.List(ee.Number()) cos
+  // we want to make a list of numbers
+  // over which we can map a function (get sqrt)
+  
+  // 2) we use repeat(3) on ee.Reducer.mean()
+  // cos we want the reduction applied 3x
+  // once per selector (i.e. squared diffs)
+  
+  // 3) we use get('mean') after reduceColumns()
+  // cos its direct output is a dictionary
+  // so we wanna extract the mean values only
+  
+  // 4) at this point rmse is a list of lists
+  // we want a list of numbers only, so
+  // we apply flatten() to rmse
+  
+  // 5) now we have a list of numbers
+  // each number is mean sqdiff per regression
+  // so now we apply sqrt function to each no.
+  
+  // 6) RMSE output values follow specified
+  // order of selectors, aka linear fit
+  // then linear regression, then CART
+  
+  // 7) since CART has lowest RMSE,
+  // CART regression performed best
+  // also confirmable by visual inspection
+
+/* Part 5: SYNTHESIS */
+
+  // 1) examine CART output
+    // compare w/ linear regression
+      // linear reg = smoother output
+      // looks closer to landsat than CART
+    // examine forest vs. agri areas
+      // CART = less forest-agri confusion
+      // bigger contrast than linear reg
+    // examine mountainous areas (aspect)
+      // CART still affected by aspect
+      // but less so than linear reg
+  
+  // 2) improve regression performance
+  // by adding/subtracting ind-vars
+  // by testing other regression functions
+  // by using more data, or all of above
+  
+  // step 1: use more data (bigger polygon)
+  // define bigger polygon around turin
+var turinBig = ee.Geometry.Polygon(
+    [
+      [
+        [7.455553918110218, 45.258245019259036],
+        [7.455553918110218, 44.51237367431335],
+        [8.773412804828967, 44.51237367431335],
+        [8.773412804828967, 45.258245019259036]
+        ]
+], null, false);
+
+  // apply same date filter to mod44b
+  // but clip to bigger turin polygon
+var percentTree2020Big = mod44b
+    .filterDate('2020-01-01', '2021-01-01')
+    .first()
+    .clip(turinBig)
+    .select('Percent_Tree_Cover');
+    
+  // step 2: adding/subtracting bands
+  // add: elev, slope, aspect
+  // subtract: B1 (coastal aerosol)
+  // and thermal bands (B10 & B11)
+var elev = ee.Image("USGS/SRTMGL1_003")
+    .select('elevation')
+    .clip(landsat8filtered.geometry());
+var slope = ee.Terrain.slope(elev);
+var aspect = ee.Terrain.aspect(elev);
+var dem = elev.addBands(slope).addBands(aspect);
+  // combine dem bands w/ landsat bands
+var landsatDem = landsat8filtered
+    .addBands(dem);
+
+var newBands = ['B2', 'B3',
+    'B4', 'B5', 'B6', 'B7',
+    'elevation', 'slope', 'aspect'];
+
+  // stack training image bands
+  // 1) constant (needed for linear reg)
+  // 2) ind-vars (Landsat 8 bands)
+  // 3) dep-var (clipped mod44b)
+var trainImageCARTBig = ee.Image(1)
+    .addBands(landsatDem.select(newBands))
+    .addBands(percentTree2020Big);
+
+print('New Bands:',
+    trainImageCARTBig.bandNames());
+    
+  // sample training image for CART
+var trainSampleCARTBig = trainImageCARTBig
+.sample({
+    region: turinBig,
+    scale: 30,
+    numPixels: 3000,
+    seed: 5
+})
+
+  // a) run RF regression
+var cartRegressionBig = ee.Classifier
+.smileRandomForest(100)
+    .setOutputMode('REGRESSION')
+    .train({
+        features: trainSampleCARTBig,
+        classProperty: 'Percent_Tree_Cover',
+        inputProperties: newBands
+});
+
+  // now we can predict in whole image
+  // then display the results
+var cartRegressionImageBig = landsatDem
+    .select(newBands)
+    .classify(cartRegressionBig, 'cartRegressionBig');
+
+Map.addLayer(cartRegressionImageBig, {
+    min: 0,
+    max: 100,
+    palette: ['white', 'green']
+}, 'RF Regression - Big Polygon');
+
+  // b) run linear regression on new image
+  // clipped to new bigger geometry
+var linearRegressionBig = trainImageCARTBig
+.reduceRegion({
+    reducer: ee.Reducer.linearRegression({
+        numX: 10,
+        numY: 1
+    }),
+    geometry: turinBig,
+    scale: 30,
+    bestEffort: true
+});
+
+  // extract LR coefficients from results
+  // then convert into list
+var coeffList = ee.Array(linearRegressionBig.get('coefficients'))
+    .project([0])
+    .toList();
+    
+  // convert coefficient list into multi-band image
+var coeffBands = ee.Image.constant(coeffList);
+
+  // predict tree cover based on linear regression
+var treecoverLRBig = ee.Image(1)
+    .addBands(landsatDem.select(newBands))
+    .multiply(coeffBands)
+    .reduce(ee.Reducer.sum())
+    .rename('treecoverLRBig')
+    .clip(landsatDem.geometry());
+    
+  // add prediction layer to map
+Map.addLayer(treecoverLRBig, {
+      // min: 0,
+      // max: 100,
+      palette: ['white', 'green']
+}, 'LR Prediction - Big Polygon');
+
+  // output: new LR smoother
+  // but RF is better i think?
+  // still affected by aspect
+  // but less so, n RF >> CART

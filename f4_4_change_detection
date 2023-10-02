@@ -1,0 +1,387 @@
+/* Chapter F4.4: Change Detection */
+
+  // in this chapter: change detection mapping
+  // how to make a 2-date land cover change map
+  // using img differencing & thresholding
+  
+  // change detection: looking at differences in
+  // images acquired at different times to
+  // assess changes in landscape conditions
+  // e.g. forest cover change, crop harvest, etc.
+  
+  // change detection mapping is important for
+  // observing, monitoring, quantifying change
+  // in landscapes over time
+  
+  // key questions answered via change detection:
+  // 1) whether a change HAS occurred
+  // 2) measuring area/extent of changing region
+  // 3) characterizing nature of change
+  // 4) measuring pattern of change (configuration)
+  
+  // basic premise of change detection methods:
+  // landscape change -> spectral change (pre vs post)
+  // challenge: separate real change of interest
+  // from noise (e.g. phenology, clouds, illumination)
+  
+  // activities creating pronounced spectral change
+  // easier to detect via RS change mapping
+  // vs subtle/gradual or short-lived changes
+  
+  // short-lived: return time of satellites
+  // may miss observation of change
+  // subtle/gradual: too slow to detect until
+  // observed using imgs over LONG interval
+  // may be suited to time series analysis
+  
+  // kennedy et al. (2009): overview of 
+  // landscape monitoring (concepts & tradeoffs)
+  // other summaries of change detection methods:
+  // singh (1989), coppin et al (2004),
+  // lu et al (2004)and woodcock et al (2020)
+  
+  // for land cover changes that occur abruptly
+  // over large areas and that are long-lived,
+  // simple 2-date img differencing is suitable
+  // ^ long-established method for change detection
+  // w/ easily interpretable results (singh, 1989)
+  
+  // workflow of img differencing approach
+  // in landscape change detection:
+  // 1) image selection & preprocessing (ofc)
+  // 2) data transformation (index of interest)
+  // 3) classifying differenced images via
+      // thresholding or supervised classification
+  // 4) evaluation of results (?)
+  
+  // for this exercise, goals are:
+  // 1) select pre- & post-event imgs
+  // 2) investigate via false-color compositing
+  // 3) calculate NBR index for each img
+  // 4) create difference img using NBR maps
+  // 5) apply threshold to diff. img
+      // to create categories (changed vs stable)
+  
+/* Section 1: Preparing Imagery */
+
+  // image pre-processing is ESSENTIAL before
+  // starting change detection workflow
+  // to ensure each pixel records same type of
+  // measurement at same location over time
+  
+  // steps in pre-processing for change detection
+  // 1) image registration (geometric)
+  // 2) radiometric & atmospheric correction
+  // altho GEE also offers Landsat images
+  // na already preprocessed automatically
+  // selecting for low cloud cover &
+  // consistent phenology also important
+  
+  // access Landsat 8 SR dataset
+  // then select & rename bands 2-7
+var landsat8 = ee.ImageCollection(
+'LANDSAT/LC08/C02/T1_L2')
+    .select(
+      ['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7'],
+      ['blue', 'green', 'red', 'nir', 'swir1', 'swir2']
+    );
+
+  // next, split landsat 8 img-coll into
+  // 2 collections, pre- & post-event
+  // then apply filtering & sorting to
+  // get single image for each time period
+  // here we use first(), but for IRL analysis
+  // may need to do compositing & cloud masking
+  // instead to limit cloud cover
+  
+  // create point to filter img-coll by loc
+var point = ee.Geometry.Point(
+    [-123.41, 42.877]);
+Map.centerObject(point, 11);
+
+  // create variable for pre-event image
+  // filter by geom & date of interest
+  // sort by cloud cover (asc) then get first
+var preImage = landsat8
+    .filterBounds(point)
+    .filterDate('2013-06-01', '2013-06-30')
+    .sort('CLOUD_COVER', true)
+    .first();
+  
+  // same idea for post-event image
+  // but different date of interest ofc
+var postImage = landsat8
+    .filterBounds(point)
+    .filterDate('2020-06-01', '2020-06-30')
+    .sort('CLOUD_COVER', true)
+    .first();
+
+/* Section 2: Creating False-Color Composites */
+
+  // b4 running any change detection analysis,
+  // useful to first visualize input images to
+  // 1) get overview of landscape
+  // 2) inspect where changes might occur
+  // 3) see problems in input b4 moving further
+  
+  // recall: false-color composites draw bands
+  // from multispectral sensors (eg nir, swir)
+  // into RGB channels to show contrast in imagery
+  
+  // below: SWIR2-NIR-RED false color composite
+  // first, create visualization parameters
+  // then add pre & post-event imgs w same viz
+var vizParam = {
+    bands: ['swir2', 'nir', 'red'],
+    min: 7750,
+    max: 22200
+};
+Map.addLayer(preImage, vizParam, 'Before');
+Map.addLayer(postImage, vizParam, 'After');
+
+  // output: bright green = vegetation
+  // black to blue = water
+  // brownish = burned/barren areas
+  
+/* Section 3: Calculating NBR */
+
+  // next step: data transformation (e.g. NBR)
+  // data (& noise) is reduced to simplify
+  // the comparison between 2 images
+  
+  // img differencing: done via subtracting
+  // spectral value of 1st img from 2nd img
+  // pixel-based eto (pixel by pixel)
+  
+  // 2 date img differencing can be used
+  // w/ single band or spectral indices
+  // (oh so di multiple bands... noted)
+  
+  // picking correct band/index to see change
+  // and correct thresholds to classify is
+  // CRITICAL to produce meaningful results
+  
+  // e.g. using NDWI to map water lvl changes
+  // e.g. NBR for soil brightness (burned area)
+  // e.g. NDVI for forest cover (beware of saturation)
+  // derived band combos customized for goal
+  // can be useful, e.g. NDFI in forest degradation
+  
+  // in this chap: use NBR to examine changes
+  // in landscape caused by forest fires
+  // NBR measures severity of fire via equation:
+  // NBR = (NIR-SWIR)/(NIR+SWIR)
+  
+  // NIR & SWIR2 chosen cos they respond most
+  // strongly to changes in forest due to fire
+  
+  // NBR an example of a normalized difference
+  // aka diff. of variables divided by sum
+  // range of output values: -1 to 1
+  
+  // NBR useful to determine fire occurrence
+  // and resulting damage to vegetation
+  // but not for other land cover changes
+  
+  // calculate NBR for each time period
+  // using built-in normalizedDifference()
+  // then rename each image band
+  // using built-in rename() fxn
+var nbrPre = preImage
+    .normalizedDifference(['nir', 'swir2'])
+    .rename('nbr_pre');
+var nbrPost = postImage
+    .normalizedDifference(['nir', 'swir2'])
+    .rename('nbr_post');
+
+/* Section 4: Single Date Transformation */
+
+  // next, we will analyze the change
+  // subtract pre-event img from post-event
+  // using subtract() fxn for images
+  // then rename image accordingly
+var nbrDiff = nbrPost
+    .subtract(nbrPre)
+    .rename('nbr_change');
+
+  // add 2-date change image to map
+  // using special batlow color ramp
+  // designed for colorblind viewers
+var palette = [
+    '011959', '0E365E', '1D5561', '3E6C55', '687B3E',
+    '9B882E', 'D59448', 'F9A380', 'FDB7BD', 'FACCFA'
+];
+var vizParams = {
+    palette: palette,
+    min: -0.2,
+    max: 0.2
+};
+Map.addLayer(nbrDiff, vizParams, 'NBR Change');
+
+  // output: dark blue = lowest = burnt areas
+  // pink = highest = vegetation gain?
+  // green & orange = midrange (little gain)
+  // recall: high NBR = veg, low NBR = burnt
+  // so negative change = higher pre than post
+  
+/* Section 5: Classifying Change */
+
+  // next, classification into thematic map
+  // consisting of stable and change classes
+  // a) simple thresholding of change layer
+    // con: have to know how to select
+    // suitable threshold to differentiate
+    // changed areas from stable areas
+  // b) classification methods (sup or unsup)
+    // con: requires addtl work to collect
+    // reference data & train classifier
+    // while not always yielding better results
+  
+  // factors in choosing which method to use:
+  // resource, timing, patterns of phenomenon
+  // recall: if mas complex yung phenomenon
+  // maybe time-series analysis is suitable
+  // which uses more than 2 dates of imagery
+  
+  // in this chap: simple thresholding lng
+  // aka decide optimal values ourselves
+  // for when pixel is deemed 'change' or not
+  
+  // finding ideal value is hard & is
+  // unique to each use case & set of inputs
+  // e.g. SWIR-2 single band vs NDVI
+  // more advanced thresholding methods
+  // are taught in chap A2.3
+  
+  // first, define 2 separate variables for
+  // threshold values for gain & loss
+var thresholdGain = 0.04;
+var thresholdLoss = -0.04;
+
+  // next, create new image w/ constant=0
+  // which will be basis of classification
+var diffClassified = ee.Image(0);
+
+  // reclassify new image via where() fxn
+  // 2=loss if value <= thresholdLoss
+  // 1=gain if value >= thresholdGain
+diffClassified = diffClassified
+    .where(nbrDiff.lte(thresholdLoss), 2)
+    .where(nbrDiff.gte(thresholdGain), 1);
+
+  // define viz params for change map then
+  // mask image by itself, add image to map
+var changeViz = {
+    palette: 'fcffc8,2659eb,fa1373',
+    min: 0,
+    max: 2
+};
+Map.addLayer(
+    diffClassified.selfMask(),
+    changeViz,
+    'Change Classification');
+
+  // output (best viewed w satellite basemap)
+  // pink = loss, blue = gain, masked = no change
+  
+  // chapters F4.5-F4.9 presents more advanced
+  // change detection algorithms that go
+  // beyond simple differencing & thresholding
+  // instead allowing change analysis
+  // across several images as a time series
+  
+/* Section 6: SYNTHESIS */
+
+  // evaluation of maps (eg change maps) is
+  // ESSENTIAL to determine whether the method
+  // used is appropriate for informing real life
+  // or whether need i-iterate & i-improve
+  
+  // maps will always have errors, due to
+  // 1) geometric registration & calibration
+  // 2) data resolution vs activity of interest
+  // 3) complexity of landscape in ROI
+  // 4) classification techniques employed
+
+  // as such, similar studyes can present
+  // diff & controversial conclusions
+  // about landscape dynamics (eg Cohen et al 2017)
+  
+  // to be useful for decision-making,
+  // a change detection mapping effort
+  // should always be transparent w/ its
+  // reliability & accuracy, eg by presenting
+  // its omission & commission error rates
+  // accuracy assessment is in chap F2.2
+  
+  // 1) try using diff. index (eg NDVI)
+  // to run change detection workflow
+  // then compare results
+  
+  // calculate NDVI for each time period
+var ndviPre = preImage
+    .normalizedDifference(['nir', 'red'])
+    .rename('ndvi_pre');
+var ndviPost = postImage
+    .normalizedDifference(['nir', 'red'])
+    .rename('ndvi_post');
+    
+  // subtract pre-image from post-image
+  // then add to map w/ vizParams
+var ndviDiff = ndviPost
+    .subtract(ndviPre)
+    .rename('ndvi_change');
+Map.addLayer(
+    ndviDiff,
+    vizParams,
+    'NDVI Change');
+  
+  // classify ndvi change map
+  // into change & stable areas
+  // 2 = loss, 1 = gain, 0 = no change
+  // recall: diffClassified = constant = 0
+var ndviDiffClassified = diffClassified
+    .where(ndviDiff.lte(thresholdLoss), 2)
+    .where(ndviDiff.gte(thresholdGain), 1);
+
+  // mask by itself then add to map
+var changeViz = {
+    palette: 'fcffc8,2659eb,fa1373',
+    min: 0,
+    max: 2
+};
+Map.addLayer(
+    ndviDiffClassified.selfMask(),
+    changeViz,
+    'NDVI Change Classification');
+    
+  // ndvi is worse at detecting burned areas
+  // and vegetation change than nbr (?)
+  // VERY SLIGHT differences sa classification
+  // but almost identical sya LOL
+  
+  // 2) try adjusting thresholdLoss & Gain
+  // eg lower absolute value of threshold
+  
+  // less holes and gaps in change areas
+  // if lower absolute value of threshold
+  // cos less stringent yung threshold
+  
+  // 4) what do u think would differencing
+  // method detect for img in same
+  // in diff szn? considering clouds & all
+  
+  // primarily change in cloud cover yeet
+  // pwede rin makadetect ng phenology
+  
+  // CONCLUSION: learned how to make a
+  // change detection map via 2-img differencing
+  // advantage over post-classification comparison
+  // aka comparing classified maps vs sat-imgs:
+    // avoid propragating errors from classification
+    // better at detecting subtle changes in land
+  // also learned how to visualizes imgs & maps
+  // aka what band combos & color ramps to use
+  // and what threshold values to use
+  // which impacts what types of changes r seen
+  

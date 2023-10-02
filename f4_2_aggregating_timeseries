@@ -1,0 +1,371 @@
+/* Chapter F4.2: Aggregating Images 
+   for Time Series */
+   
+  // many RS data = repeated observations over time
+  // but interval bet. observations varies widely
+  // e.g. Landsat 8 = 16 days vs Sentinel-2 = 5 days
+  
+  // e.g. global precipitation measure = 3hrs
+  // vs climate hazards group infrared precipitation
+  // with station (CHIRPS) project = daily, 5-day
+  
+  // however, many applications need aggregations
+  // of data at intervals diff. from datasets'
+  // e.g. finding rainfall anomalies, useful to
+  // compare monthly vs long-period monthly avg
+  
+  // moreover, while single scenes r informative
+  // many days r cloudy, n thus it helps to build
+  // a robust cloud-free time series for many uses
+  
+  // cloud-free composites can be done by aggregating
+  // data into monthly, sznal, or yrly composites
+  // built from individual scenes
+  
+  // e.g. to detect longterm changes in urban area,
+  // yearly median composites enables change detection
+  // across large time intervals w/o risk of noise
+  
+  // in short, uses of time series aggregates:
+  // 1) time series analysis mismo
+  // 2) to limit impact of day-to-day noise
+  
+  // in this chap: techniques for aggregating
+  // indiv. imgs from time series to some interval
+  // aggregate CHIRPS daily time series for 1 yr
+  // into monthly rainfall time series
+  
+  // CHIRPS: hi-res global gridded rainfall dataset
+  // merging satellite & ground station data
+  // in consistent, long time-series dataset
+  // provided by UC Santa Barbara, 1981-present
+  
+  // CHIRPS very useful for drought monitoring
+  // and assessing terrestrial envi change globally
+  // sat data calibrated w/ ground data = final product
+  
+  // in this chap, we will work w/ CHIRPS pentad
+  // PENTAD: grouping of five days (or less)
+  // 6 pentads in 1 month = 5 whole pentads +
+  // 1 extra pentad for extra 3-6 days in month
+  
+  // pentads reset at starrt of each month
+  // aka 1st day of month = start of new pentad
+  // values per pixel = total rainfall (in mm)
+  // summed up over pentad (5 or so days)
+  
+/* Section 1: Filtering an Image Collection */
+
+  // start by accessing CHIRPS pentad collection
+  // and filtering it to year=2019
+var chirps = ee.ImageCollection(
+'UCSB-CHG/CHIRPS/PENTAD');
+var startDate = '2019-01-01';
+var endDate = '2020-01-01';
+var yearFiltered = chirps
+    .filterDate(startDate, endDate);
+print('Manual Date-Filtered CHIRPS:', 
+    yearFiltered);
+  
+  // CHIRPS has 1 image per pentad
+  // since filter=1yr, coll has 72 images
+  // metadata per image viewable in console
+  // date stamps show spaced every 5 days
+  
+  // pixel value = total rainfall over pentad
+  // useless if interval isn't matched w/ other data
+  // for hydrological analysis, usually need
+  // total rainfall for a month/a szn
+  // so we aggregate 72 images into 12 images
+  // = 1 img per month -> px values = month total
+
+/* Section 2: Working With Dates in GEE */
+
+  // to aggregate time series, we need to
+  // learn how to create & manipulate dates
+  // in GEE, using ee.Date module
+  
+  // GEE has fxn called ee.Date.fromYMD()
+  // which creates ee.Date object from
+  // year, month, and day values
+  // we create date w/ year=2019
+var year = 2019;
+var startDate = ee.Date.fromYMD({
+    year: year,
+    month: 1,
+    day: 1
+});
+
+  // now, let's create an end date to be able
+  // to specify a desired time interval
+  
+  // best way to create date relative to another
+  // is using advance() fxn, w/ 2 params:
+  // delta value, and unit of time
+  // create date 1 yr in future from given date
+var endDate = startDate
+    .advance(1, 'year');
+  
+  // next, filter CHIRPS data using new dates
+  // check results in console if correct dates
+var yearFiltered = chirps
+    .filterDate(startDate, endDate);
+print('Programmatic Date-Filtered CHIRPS:', 
+    yearFiltered);
+
+  // another date fxn used in GEE is millis()
+  // which takes a date object and then
+  // returns no. of millisecs since arbitrary
+  // reference date of start of year 1970:
+  // 1970-01-01T00:00:00Z aka Unix Timestamp
+  
+  // Unix Timestamp: standard way to convert
+  // dates to numbers, and allows for easy
+  // comparison bet. dates w/ high precision
+  
+  // GEE objects store timestamps for imgs &
+  // features in special properties called
+  // system:time_start and systemLtime_end
+  // both r supplied w/ numbers, not dates
+  // which millis() fxn helps with :)
+  
+  // print result of millis() to check
+print('Start Date:', startDate);
+print('End Date: ', endDate);
+
+print('Start Date as Timestamp:',
+    startDate.millis());
+print('End Date as Timestamp:',
+    endDate.millis());
+  
+  // in next sec, we will use millis() fxn
+  // to set system:time_start & time_end
+  // properties of aggregated images
+  
+/* Section 3: Aggregating Images */
+
+  // now we aggregate pentads into monthly sums
+  // process of aggregation has 2 main steps:
+  // 1) set start & end date of 1 interval (month)
+  // 2) sum up all values w/in each interval
+  
+  // to begin, we decide that resulting series
+  // will contain 12 images (1 per month)
+  // so we create ee.List of values from 1 to 12
+  // using ee.List.sequence() fxn to create
+  // list of items of type ee.Number
+var months = ee.List.sequence(1, 12);
+
+  // next, we write a fxn w/ input=month and
+  // returns an aggregated img for that month
+  // given startMonth as input param, we:
+var createMonthlyImage = function(startMonth){
+    // 1) create start & end date for that month
+    // based on year & month variables, using
+    // ee.Date.fromYMD() and advance()
+    var startDate = ee.Date.fromYMD(year, startMonth, 1);
+    var endDate = startDate.advance(1, 'month');
+    
+    // 2) filter collection to find all imgs
+    // falling w/in that month
+    var monthFiltered = yearFiltered
+        .filterDate(startDate, endDate);
+    
+    // 3) apply ee.Reducer.sum() to create a
+    // monthly rainfall image, reducing six
+    // pentad images per month to a single img
+    var total = monthFiltered
+        .reduce(ee.Reducer.sum());
+
+    // 4) we set timestamp properties system:
+    // time_start & time_end of resulting image
+    // using millis() fxn to convert to number
+    return total.set({
+        'system:time_start': startDate.millis(),
+        'system:time_end': endDate.millis(),
+    // as well as set year & month to facilitate
+    // filtering of resulting collection later
+        'year': year,
+        'month': startMonth
+    });
+};
+
+  // we now have: 1) list containing items of
+  // type ee.Number from 1 to 12 for months, and
+  // 2) fxn that computes monthly aggregate
+  // image for each month number
+  
+  // now we map() the fxn over the list
+  // map() passes over each item in list
+  // and runs createMonthlyImage for each
+  // result: list of monthly images per month
+var monthlyImages = months
+    .map(createMonthlyImage); // ee.List !
+    
+  // we can create an image collection
+  // from resulting ee.List of images via
+  // ee.ImageCollection.fromImages() fxn
+var monthlyCollection = ee.ImageCollection
+    .fromImages(monthlyImages);
+print(monthlyCollection);
+
+  // we have now successfully aggregated a
+  // collection from a source collection by
+  // filtering, mapping, and reducing, as
+  // described in previous chapters :)
+  
+  // expand printed collection in console
+  // to verify that we have 12 imgs in coll
+  // output: 12 imgs indeed, w right properties
+  // addtl property: system:index
+  
+/* Section 4: Plotting Time Series */
+
+  // 1 use of gridded rainfall datasets is
+  // to analyze rainfall patterns time-wise
+  // we can plot a time-series chart for a loc
+  // using newly computed monthly time series
+  
+  // here we create a point geometry for filtering
+  // point = bengaluru, india
+var point = ee.Geometry.Point(
+    77.5946, 12.9716);
+  
+  // GEE comes w/ built-in ui.Chart.image.series
+  // fxn that can plot time series :)
+  // params: imageCollection (duh), region (duh),
+  // scale: pixel size (based on data catalog info)
+  // for CHIRPS, scale = 5566 meters
+  // resulting chart is printed in console
+var chart = ui.Chart.image.series({
+    imageCollection: monthlyCollection,
+    region: point,
+    reducer: ee.Reducer.mean(),
+    scale: 5566,
+});
+print(chart);
+
+  // we can make chart more informative by
+  // adding axis labels & title via
+  // setOptions() fxn, which allows us to
+  // customize chart using parameters
+  // from Google Charts :o
+var newChart = chart
+    .setOptions({
+        lineWidth: 1,
+        pointSize: 3,
+        title: 'Monthly Rainfall at Bengaluru',
+        vAxis: {
+            title: 'Rainfall (mm)'
+        },
+        hAxis: {
+            title: 'Month',
+            gridlines: {
+                count: 12
+            }
+      }
+});
+// print(newChart);
+  
+  // we will see 2 charts in console:
+  // old view, and new customized view
+    // parang 1 chart lng nmn? LOl but anw
+  
+  // new chart shows typical rainfall
+  // pattern in city of bengaluru, india
+  // w a temperate climate & pre-monsoon
+  // rains in apr-may cooling down city
+  // + monsoon szn from june to sep
+  
+/* Section 5: SYNTHESIS */
+
+  // 1) CHIRPS contains data for 40 yrs
+  // so aggregate to yrly imgs then create
+  // chart for annual rainfall (1981-2021)
+  // at ur chosen location
+  
+  // instead of creating list of months
+  // and defining fxn to create monthly imgs
+  // we create list of years & make fxn to
+  // create yearly images
+  
+  // create list of years
+var years = ee.List.sequence(1981, 2021);
+
+  // write a fxn that takes a year number
+  // and returns a yearly image
+var createYearlyImage = function(startYear){
+    // create startDate & endDate
+    // using ee.Date.fromYMD() and advance()
+    // and using input startYear as year
+    var startDate = ee.Date.fromYMD(startYear, 1, 1);
+    var endDate = startDate.advance(1, 'year');
+    
+    // filter collection by start & end date
+    var yearFiltered = chirps
+        .filterDate(startDate, endDate);
+    
+    // reduce yearly collection to sum
+    var yearTotal = yearFiltered
+        .reduce(ee.Reducer.sum());
+        
+    // set timestamp and year properties
+    // using millis() fxn for timestamps
+    // and input startYear as year
+    return yearTotal.set({
+        'system:time_start': startDate.millis(),
+        'system:time_end': endDate.millis(),
+        'year': startYear
+    });
+};
+
+  // map fxn to list of year numbers
+  // then convert list of imgs to img-coll
+var yearlyImages = years
+    .map(createYearlyImage);
+var yearlyCollection = ee.ImageCollection
+    .fromImages(yearlyImages);
+print(yearlyCollection);
+  
+  // output in console: 41 (!) images
+  // 41 years kasi 2021 - 1981 + 1
+  // may + 1 kasi inclusive sya (incl. 2021)
+  
+  // now create chart of yearly time-series
+  // using specified location (manila)
+  // don't forget to print the chart!
+var manilaPt = ee.Geometry.Point(
+    121.0261, 14.6157);
+var yearlyChart = ui.Chart.image.series({
+    imageCollection: yearlyCollection,
+    region: manilaPt,
+    reducer: ee.Reducer.mean(),
+    scale: 5566
+}).setOptions({
+    lineWidth: 1,
+    pointSize: 3,
+    title: 'Yearly Rainfall at Manila',
+    vAxis: {
+        title: 'Rainfall (mm)'
+    },
+    hAxis: {
+        title: 'Year',
+        gridlines: {
+            count: yearlyCollection.size()
+        }
+    }
+});
+print(yearlyChart);
+
+  // output: time-series chart for
+  // 41 yrs of rainfall in manila :)
+  
+  // CONCLUSION: learned how to aggregate
+  // a collection to months/yrs and then
+  // plot resulting time series to a loc
+  
+  // also introduced useful fxns for working
+  // w/ dates useful in many applications
+  // and how to iterate over list using map()
+  // which is essential for processing large
+  // amts of data in cloud-based RS like GEE

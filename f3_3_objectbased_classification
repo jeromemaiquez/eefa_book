@@ -1,0 +1,454 @@
+/* Chapter F3.3: Object-based Image Analysis */
+
+  // pixel-based classifications often noisy
+  // object-based classification limit noise
+  // by detecting objects w/in images
+  
+  // OBJECT-BASED IMAGE ANALYSIS: classifies
+  // imagery into OBJECTS using perception-
+  // based, meaningful knowledge
+  
+  // object classification: 2-step approach
+  // 1) img segmented via segmentation algorithm
+  // 2) objects classified via sup./unsup. methods
+  
+  // SEGMENTATION ALGORITHMS: clusters pixels
+  // by texture, color/px values, shape, size, etc.
+  // aka information from imagery mismo
+  
+  // object based image analysis often used
+  // to monitor forest disturbances cos
+  // addtl info included in classification
+  // via the segmentation process
+  
+  // SIMPLE NON-ITERATIVE CLUSTERING (SNIC):
+  // 1 segmentation algorithm available in GEE
+  // SNIC: bottom-up, seed-based segm-algo that
+  // that clusters nearby pixels based on
+  // compactness, connectivity, neighborhood size
+  
+  // SNIC has been used in GEE research for
+  // mapping LULC, wetlands, burned areas,
+  // SDG indicators, and ecosystem services
+  
+  // workflow of object-based classification:
+  // 1) perform SNIC segmentation on image
+  // 2) extract band means per cluster
+  // 3) classify repainted segments
+  
+/* Section 1: Unsupervised Classification */
+
+  // we learned how to perform classification
+  // in Chap F2.1 (supervised & unsupervised)
+  
+  // here we will perform unsup. classification
+  // after object-based segmentation, to look
+  // at spectral & spatial variability that
+  // is seen by classification algorithm
+  
+  // fxn 1.1: Unsupervised k-Means Classification
+  
+  // first, define function that takes image
+  // and breaks it into set of unsup. classes
+  // w/o using spatial characteristics of image
+  // using k-means clustering algorithm
+  
+  // this function does unsupervised clustering
+  // input = any image; all bands used in clustering
+  // numberOfUnsupervisedClusters = tunable
+    // parameter for how many clusters to create
+var afn_Kmeans = function(
+    input,
+    numberOfUnsupervisedClusters,
+    defaultStudyArea, 
+    nativeScaleOfImage){
+    
+    // make new sample set from input
+    // randomly selected spatially
+    var training = input.sample({
+        region: defaultStudyArea,
+        scale: nativeScaleOfImage,
+        numPixels: 1000
+    });
+    
+    // instantiate cluster & train w/ sample
+    var cluster = ee.Clusterer.wekaKMeans(
+        numberOfUnsupervisedClusters)
+        .train(training);
+    
+    // now apply clusterer to raw image
+    // that was passed as parameter
+    var toExport = input.cluster(cluster);
+    print('Clustering Result', toExport);
+    
+    // single band: clustering results
+    // select this band then rename it
+    var clusterUnsup = toExport
+        .select(0).rename(
+        'unsupervisedClass');
+    return (clusterUnsup);
+};
+
+  // we also need a fxn to normalize band
+  // values to common scale (from 0 to 1)
+  // and a fxn to add mean to band name
+  
+  // fxn 1.2: Simple normalization by maxes
+  // bandMaxes defined later on in image
+var afn_normalize_by_maxes = function(img, 
+bandMaxes){
+    return img.divide(bandMaxes);
+};
+
+  // fxn 1.3: seed creation & SNIC segmentation
+var afn_SNIC = function(
+    imageOriginal, 
+    SuperPixelSize, 
+    Compactness, 
+    Connectivity,
+    NeighborhoodSize, 
+    SeedShape){
+    
+    // create grid of seed pixels of clustering
+    // via ee.Algorithms.Image.Segmentation
+    var theSeeds = ee.Algorithms.Image.Segmentation
+        .seedGrid(SuperPixelSize, SeedShape);
+    
+    // instantiate SNIC clusterer
+    // using parameters defined later on
+    var snic2 = ee.Algorithms.Image.Segmentation.SNIC({
+        image: imageOriginal,
+        size: SuperPixelSize,
+        compactness: Compactness,
+        connectivity: Connectivity,
+        neighborhoodSize: NeighborhoodSize,
+        seeds: theSeeds
+    });
+    
+    // stack together snic results w/ seed pixels
+    var theStack = snic2.addBands(theSeeds);
+    return (theStack);
+};
+
+  // fxn 1.4: simple add mean to band name
+  // cos SNIC will output 'band_mean' per band
+var afn_addMeanToBandName = function(i){
+    return i + '_mean';
+};
+
+  // create a section that defines variables
+  // that user (me) can adjust later on
+  
+  // param 2.1: unsupervised k-mean classification
+var numberOfUnsupervisedClusters = 4;
+
+  // param 2.2: visualization & saving
+var centerObjectYN = true;
+
+  // param 2.3: object-growing params to
+  // change superpixel seed & SNIC params
+  // superpixel seed location spacing (in px)
+var SNIC_SuperPixelSize = 8;
+  // larger values = more compact clusters
+  // setting to 0 = no spatial distance weighting
+var SNIC_Compactness = 0;
+  // connectivity (either 4 or 8)
+var SNIC_Connectivity = 8;
+  // either 'square' or 'hex'
+var SNIC_SeedShape = 'square';
+
+  // params 2.4: no need to change
+  // tile neighborhood size (to avoid
+  // tile boundary artifacts)
+  // default: 2 * size
+var SNIC_NeighborhoodSize = 2 *
+    SNIC_SuperPixelSize;
+
+  // now, w/ fxns & params defined, lets
+  // define new image & set values
+  // specific to that image to analyze it
+  
+  // why use if statements? cos we will use
+  // images from diff. sensors in ff. sxns,
+  // so they are preloaded already
+  // so w/ if-statements, we can just change
+  // param "whichImage" to make it easier
+  
+  // focus Sentinel-2 image in Puget Sound, WA
+  // differentiate forest & non-forest regions
+
+  // 3.1: select image to classify
+var whichImage = 1; // will be used to select image
+if (whichImage == 1){
+    // image 1: puget sound, WA
+    // forest harvest (april 21, 2016)
+    // harvested parcels, clear boundaries
+    // sentinel 2, 10m
+    var whichCollection = 'COPERNICUS/S2';
+    var ImageToUseID = '20160421T191704_20160421T212107_T10TDT';
+    var originalImage = ee.Image(whichCollection +
+        '/' + ImageToUseID);
+    var nativeScaleOfImage = 10;
+    // bands to use in visualizing map
+    var threeBandsToDraw = ['B12', 'B11', 'B8'];
+    // bands to use in classification
+    var bandsToUse = ['B12', 'B11', 'B8'];
+    // max band values for normalization
+    var bandMaxes = [1e4, 1e4, 1e4];
+    // min & max values for visualization
+    var drawMin = 0;
+    var drawMax = 0.3;
+    var defaultStudyArea = ee.Geometry.Polygon(
+        [
+            [
+                [-123.13105468749993, 47.612974066532004],
+                [-123.13105468749993, 47.56214700543596],
+                [-123.00179367065422, 47.56214700543596],
+                [-123.00179367065422, 47.612974066532004]
+            ]
+        ]);
+    var zoomArea = ee.Geometry.Polygon(
+        [
+            [
+                [-123.13105468749993, 47.612974066532004],
+                [-123.13105468749993, 47.56214700543596],
+                [-123.00179367065422, 47.56214700543596],
+                [-123.00179367065422, 47.612974066532004]
+            ]
+        ], null, false);
+}
+Map.addLayer(originalImage
+.select(threeBandsToDraw), {
+    min: 0,
+    max: 2000
+}, '3.1 ' + ImageToUseID, true, 1);
+
+  // 4) now clip image to study area
+  // then extract bands to use
+  // in classification process
+var clippedImageSelectedBands = originalImage
+    .clip(defaultStudyArea)
+    .select(bandsToUse);
+  // apply normalization fxn
+  // to clipped image w/ selected bands
+var ImageToUse = afn_normalize_by_maxes(
+    clippedImageSelectedBands, bandMaxes);
+Map.addLayer(ImageToUse
+.select(threeBandsToDraw), {
+    min: 0.028,
+    max: 0.12
+}, '4.3 Post-normalization image', false, 0);
+
+  // 5) SNIC clustering: this fxn returns
+  // a multi-band image post-SNIC
+  // automatically determines new bandnames
+  // returned after segmentation
+print('5.1 Execute SNIC');
+var SNIC_MultiBandedResults = afn_SNIC(
+    ImageToUse,
+    SNIC_SuperPixelSize,
+    SNIC_Compactness,
+    SNIC_Connectivity,
+    SNIC_NeighborhoodSize,
+    SNIC_SeedShape
+);
+
+  // reproject SNIC results to native scale
+  // and pseudo-mercator CRS
+var SNIC_MultiBandedResults = SNIC_MultiBandedResults
+    .reproject('EPSG:3857', null, nativeScaleOfImage);
+print('5.2 SNIC Multi-Banded Results',
+    SNIC_MultiBandedResults);
+
+Map.addLayer(SNIC_MultiBandedResults
+    .select('clusters')
+    .randomVisualizer(), {},
+    '5.3 SNIC Segment Clusters', false, 1);
+
+  // select seeds band from SNIC results
+  // then add to map for visualization
+var theSeeds = SNIC_MultiBandedResults
+    .select('seeds');
+Map.addLayer(theSeeds, {
+    palette: 'red'
+}, '5.4 Seed Points of Clusters', false, 1);
+
+  // add '_mean" to names of bands used
+var bandMeansToDraw = threeBandsToDraw
+    .map(afn_addMeanToBandName);
+print('5.5 Band Means to Draw',
+    bandMeansToDraw);
+  // select 3 mean bands from SNIC results
+  // using new 'band_mean' names
+  // output: image repainted per segment
+  // w mean band value
+var clusterMeans = SNIC_MultiBandedResults
+    .select(bandMeansToDraw);
+print('5.6 Cluster Means by Band',
+    clusterMeans);
+Map.addLayer(clusterMeans, {
+    min: drawMin,
+    max: drawMax
+}, '5.7 Image repainted by segments', true, 0);
+  
+  // 6) now let's view the result of pixel-based
+  // unsupervised classification w/ k-means
+  // first, perform pixel-based k-means clustering
+var perPixelUnsupervised = afn_Kmeans(
+ImageToUse, numberOfUnsupervisedClusters,
+defaultStudyArea, nativeScaleOfImage);
+Map.addLayer(perPixelUnsupervised
+.select('unsupervisedClass')
+.randomVisualizer(),
+    {}, '6.1 Per-Pixel Unsupervised', true, 0);
+print('6.1b Per-Pixel Unsupervised Results: ',
+    perPixelUnsupervised);
+    
+  // zoom if requested
+if (centerObjectYN === true) {
+    Map.centerObject(zoomArea, 13);
+}
+
+  // 6.2 next, SNIC unsupervised classification
+  // using k-means to classify SNIC clusters
+var bandMeansNames = bandsToUse
+    .map(afn_addMeanToBandName);
+print('6.2 Band Mean Names from Segmentation',
+    bandMeansNames);
+var meanSegments = SNIC_MultiBandedResults
+    .select(bandMeansNames);
+var segmentUnsupervised = afn_Kmeans(
+    meanSegments,
+    numberOfUnsupervisedClusters,
+    defaultStudyArea,
+    nativeScaleOfImage);
+Map.addLayer(segmentUnsupervised
+    .randomVisualizer(), {},
+    '6.3 SNIC Clusters Unsupervised', true, 0);
+print('6.3b Per-Segment Unsupervised Results: ',
+    segmentUnsupervised);
+
+  // q1: pros & cons of map
+    // detailed but noisy
+  // q2: single land use visually,
+  // but diff. clusters in map... why?
+    // maybe cos per-pixel lng?
+    // based on distance in feature space
+    // kaya visual != spectral clusters
+  // q3: given cluster can represent
+  // >1 LULC class in image; is this bad?
+    // LOL idk u tell me
+  // q4: raise/lower no. of clusters
+  // which is better than orig.?
+    // 3 and 4 seem to be best...
+  // q5: did using false composite
+  // improve clustering result? 
+    // weirdly enough, yes?
+    // less noisy, clearer boundaries
+  // q6: test cluster nos. w/ new bands
+  // any preferable combo?
+    // 5 clusters looks good...
+    
+/* Section 2: Object Detection in 
+   Imagery using SNIC Algorithm */
+  
+  // noise in previous pixel-based clustering
+  // will now be improved via 2-step approach
+  // for object-based image analysis
+  
+  // 1) segment image via SNIC algorithm
+  // 2) classify segments via k-means
+  // add SNIC segmentation fxn after 1.2
+  
+  // then add call to SNIC fxn bet. 4 & 6
+  // notice that it uses new params in sec2
+  
+  // output: randomly colored clusters
+  // w/ red 'seed' pixels regularly spaced
+  
+  // SNIC creates square/hexagon 'superpixels'
+  // out of seed pixels, then edges are
+  // adjusted to align w/ edges in image
+  // some superpixels merge w/ each other
+  // kaya some of them have >1 seed pixels
+  
+  // compare layer 5.7 to layer 3.1
+  // layer 5.7 is reinterpretation of 3.1
+  // where all pixels in given shape in 5.3
+  // is assigned mean value of pixels in shape
+  // homogeneous = same color; hetero = many colors
+  
+  // q7: what is effect of change superpx size
+  // on appearance of SNIC clusters
+    // lalaki or liliit accordingly...?
+  // q8: what is effect of changing
+  // SNIC_Compactness?
+    // larger = more square? lets check
+    // TRUE; 1 is already too square
+    
+/* Section 3: Object-Based
+   Unsupervised Classification */
+   
+  // the k-means clusterer is not aware
+  // that we want adjacent pixels to be
+  // grouped into the same cluster
+  // hence noise in k-means classification
+  
+  // but now that we re-colored pixels
+  // in SNIC cluster to share same band values
+  // k-means can group all pixels per cluster
+  // to all have the same class
+  
+  // this allows us to improve our classification
+  // from pixel-based to show real objects on earth
+  
+  // return SNIC params to their orig values
+  // then add SNIC unsupervised classification
+  // as code section 6.2
+  
+  // q10: what is diff. bet. per-pixel and
+  // post-SNIC k-means classification?
+    // post-SNIC: less noise but less detail
+    // clearer boundaries bet. diff LULC
+
+/* Section 4: Classifications with
+   More or Less Categorical Detail */
+   
+  // k-means partitions data into no. of classes
+  // cos colors are chosen randomly, any change
+  // in no. of clusters -> change in color scheme
+  // pwede rin after change in area size
+  // reminder: clusters != single LULC types
+  
+  // q11: test powers of 2 for no. of clusters
+  // which one discriminates best?
+  // which numbers too complicated na?
+    // 2 too simple, 4-8 pretty ok
+    // 16 and beyond too complicated na
+  // q12: what concrete criteria can be
+  // used to check if classification is
+  // good or bad for given goal?
+    // enough detail, still understandable
+    // matches well w/ reference data
+    // clusters correspond well to LULC classes
+
+/* Section 5: Effects of SNIC Parameters */
+  
+  // no. of classes controls partition
+  // of landscape into set of SNIC clusters
+  // 4 other params influence spatial
+  // characteristics of clusters produced
+  
+  // test effect of diff param values
+  // on clusters (5.3) and classification (6.3)
+  // explore effects of changing multiple values
+  
+  // q13: what is effect on classification
+  // of changing superpixel size?
+    // more detail actually... nice
+  // q14: effect of changing compactness?
+    // higher = blobbier, lower = snakier
+  // q15: effect of connectivity & seed shape?
+    // probably noisier idk, try natin
+    // connectivity=8 looks good...
+    // parang noisy if seedshape = hex

@@ -1,0 +1,624 @@
+/* Chapter F3.2: Neighborhood-Based 
+   Image Transformation */
+
+  // neighbood transformations take into account
+  // multiple pixels around a focal pixel
+  // to inform transformation of that focal pixel
+  // thus, a spatial aspect of img transformations
+  
+  // e.g. image has pixels w/ outlier values
+  // can use neighborhood-based transform (e.g. median)
+  // to diminish effect of outlier values
+  // a la loess smoothing in time series, but
+  // averaging across 2Ds (lat & long, vs time)
+  
+  // neighborhood-based transforms are major part
+  // of many remote sensing analysis workflows
+  // e.g. edge detection or median reducers
+  // for land cover classification eforts
+  
+/* Section 1: Linear Convolution */
+
+  // LINEAR CONVOLUTION: refers to calculating
+  // linear combo of pixel values in neighborhood
+  
+  // in GEE, kernel: neighborhood of given pixel
+  // kernel defines size & shape of neighborhood
+  // and weight for each position in kernel
+  
+  // to implement linear convolution in GEE,
+  // we use convolve(ee.Kernel()) method
+  
+  // convolution used to extract info at diff scales
+  // thus, smoothing kernels aka low-pass filters
+  // & edge detection kernels aka high-pass filters
+  
+  // "filters" in convolution same as kernels
+  // vs. filters in GEE for retaining by attrib/loc
+  
+/* Section 1A: Smoothing */
+  
+  // SMOOTHING: replaces value of each pixel w/
+  // function summarizing neighborhood (e.g. mean)
+  // e.g. square kernel w/ unif. weights sum to one
+  
+  // diminishes image noise by replacing extremes
+  // w/ blend of surrounding values, all bcos
+  // averages are less extreme than indiv values
+  
+  // irl, critical to check stat properties of data
+  // before constructing a smoothing kernel
+  
+  // create & print square kernel w/ uniform weights
+  // shape=square, radius(in px)=2 (5x5 square)
+print('A Uniform Kernel: ', 
+  ee.Kernel.square(2));
+  
+  // formula: focal pixel output value = 
+  // sum(neighbor pixel value * kernel weight)
+  // i think smoothing cos positive value?
+  // a la mean or weighted mean (if gaussian)
+
+  // can also define kernel radius in meters
+  // adjusts size to pixel size so can't see weights
+  // but more flexible in diff. spatial resolutions
+  
+  // e.g. NAIP, w/ 0.5-2m px size (based on loc & date)
+  // define point near odessa, eastern WA
+var odessa = ee.Geometry.Point([
+    -118.7225, 47.1507]);
+
+  // load NAIP data & filter by loc, date, first
+var imageNAIP = ee.ImageCollection(
+'USDA/NAIP/DOQQ')
+    .filterBounds(odessa)
+    .filterDate('2017-01-01', '2018-12-31')
+    .first();
+Map.centerObject(odessa, 16);
+
+  // display NAIP image
+var trueColor = {
+    bands: ['R', 'G', 'B'],
+    min: 0,
+    max: 255
+};
+Map.addLayer(imageNAIP, trueColor, 
+    'NAIP True Color');
+  
+  // output: very hi-res image over small area
+  // irl, use polygon to filter over larger area
+  // and use reduce() (not first) to use NAIP
+  
+  // now define square kernel w/ 2m radius
+  // w/ uniform weights to use for smoothing
+var uniformKernel = ee.Kernel.square({
+    radius: 2,
+    units: 'meters'});
+
+  // now apply smoothing operation by
+  // convolving image w/ our new kernel
+var smoothed = imageNAIP
+    .convolve(uniformKernel);
+Map.addLayer(smoothed, {
+    min: 0,
+    max: 255
+}, 'NAIP Smoothed', 0);
+
+  // output: less obvious patches & edges
+  // can increase radius to smooth more
+  // same pixel size, less extreme values
+  
+  // GAUSSIAN KERNEL: closer pixels weighted
+  // heavier than farther pixels
+  // think: gaussian curve aka bell curve
+  
+  // keeps lines better than uniform smoothing
+  // used when feature conservation is impt
+  // e.g. oil slick detection, etc.
+  
+  // print gaussian kernel to see its weights
+print('A Gaussian Kernel: ', 
+  ee.Kernel.gaussian(2));
+  
+  // create gaussian kernel w/ 2m radius
+var gaussianKernel = ee.Kernel.gaussian({
+    radius: 2,
+    units: 'meters'
+}); 
+
+  // convolve image w/ 2m gaussian kernel
+var gaussian = imageNAIP
+    .convolve(gaussianKernel);
+Map.addLayer(gaussian, {
+    min: 0,
+    max: 255
+}, 'NAIP Gaussian Smoothed', 0);
+
+/* Section 1B: Edge Detection */
+
+  // EDGE DETECTION kernels: used to find
+  // rapid changes in RS image values
+  // signifying edges of objects in image
+  
+  // finding edges useful in many applications
+  // e.g. finding transitions bet. LULC classes
+  // LAPLACIAN KERNEL: common edge-detection kernel
+  // other ED kernels: sobel, prewitt, roberts
+  
+  // define & print laplacian kernel
+var laplacianKernel = ee.Kernel.laplacian8();
+print('Edge Detection Laplacian Kernel: ',
+    laplacianKernel);
+
+  // notice: focal cell value is negative
+  // of sum of all neighborhood values
+
+  // now convolve image w/ laplacian kernel
+var edges = imageNAIP
+    .convolve(laplacianKernel);
+Map.addLayer(edges, {
+    min: 0,
+    max: 255
+}, 'NAIP Laplacian Edge Detection', 0);
+
+  // output: no contrast w/ image except for
+  // edges (areas w/ big change in px value)
+  
+  // GEE has other algorithms that detect edges
+  // e.g. Canny edge-detection algorithm (1986)
+  // which uses 4 diff. kernels to find
+  // diagonal, vertical, and horizontal edges
+  
+/* Section 1C: Sharpening */
+
+  // IMAGE SHARPENING (aka edge enhancement)
+  // leverages edge-detection techniques
+  // to sharpen edges in images, mimicking
+  // human eye's ability to separate objects
+  // with the use of Mach bands
+  
+  // to achieve this, we add image to the
+  // 2nd derivative of the image
+  
+  // in GEE, we use 2 gaussian kernels in a
+  // difference-of-gaussians convolution
+  // then add this to input image
+  
+  // first, create two gaussian kernels
+  // 1) a "fat" gaussian kernel
+var fat = ee.Kernel.gaussian({
+    radius: 3,
+    sigma: 3, // stdev of gaussian fxn
+    magnitude: -1, // neg para difference
+    units: 'meters'
+});
+  // 2) a "skinny" gaussian kernel
+var skinny = ee.Kernel.gaussian({
+    radius: 3,
+    sigma: 0.5, // less stdev -> skinnier curve
+    units: 'meters'
+});
+
+  // now combine the two gaussian kernels
+  // into a difference-of-gaussians kernel
+  // then print result to see weights
+var dog = fat.add(skinny);
+print('DoG Kernel for Sharpening: ', dog);
+
+  // weights not viewable cos unit=meter
+
+  // add DoG convolved image to orig image
+var sharpened = imageNAIP.add(
+    imageNAIP.convolve(dog));
+Map.addLayer(sharpened, {
+    min: 0,
+    max: 255
+}, 'DoG Edge Enhancement', 0);
+
+  // output: image sharper than even
+  // orig very hi-res image :o
+
+/* Section 2: Nonlinear Convolution */
+
+  // NONLINEAR CONVOLUTION fnx use nonlinear
+  // combos of neighborhood pixel values
+  // vs linear combos for linear convolution
+  
+  // both use same ideas of neighborhood,
+  // focal pixel, and kernel, BUT in GEE
+  // nonlinear convolutions are performed
+  // via reduceNeighborhood() on images
+  
+/* Section 2A: Median */
+  
+  // median neighborhood filters used
+  // for removing noise from images
+  // w/ little effect from outliers
+  
+  // vs mean, where outliers pollute focus,
+  // pulling pixel value up or down
+  
+  // reuse uniform 5x5 kernel from earlier
+  // to implement median neighborhood filter
+  // via reduceNeighborhood()
+var median = imageNAIP.reduceNeighborhood({
+    reducer: ee.Reducer.median(),
+    kernel: uniformKernel
+});
+Map.addLayer(median, {
+    min: 0,
+    max: 255
+}, 'Median Neighborhood Filter', 0);
+
+  // output: edges preserved better than
+  // in uniform smoothing from mean filter
+  // but looks less natural cos non-linear
+
+/* Section 2B: Mode */
+  
+  // MODE: identifies most common item in set
+  // most used for nominal data (eg LULC maps)
+  // vs mean, median for numerical data
+  // remove indiv. or grps of isolated pixels
+  
+  // example: make categorical map by
+  // thresholding NIR band at gt(200)
+  // to display vegetation vs. non-veg
+var veg = imageNAIP.select('N').gt(200);
+
+  // display resulting binary map
+var binaryViz = {
+    min: 0,
+    max: 1,
+    palette: ['black', 'green']
+};
+Map.addLayer(veg, binaryViz,
+    'Vegetation Categorical Map', 0);
+  
+  // output: green=veg, black=non-veg
+    
+  // now we use uniformKernel to compute
+  // mode in each 5x5 neighborhood
+var mode = veg.reduceNeighborhood({
+    reducer: ee.Reducer.mode(),
+    kernel: uniformKernel
+});
+Map.addLayer(mode, binaryViz,
+    'Mode Filter on Binary Map', 0);
+  
+  // output: less indiv. pixel noise
+  // and more cohesive areas of vegetation
+  // vs. original veg binary map
+  
+/* Section 3: Morphological Processing */
+
+  // MORPHOLOGY aka shape of OBJECTS
+  // helps delineate objects (e.g. veg) better
+  // to improve object-based classification
+  // or as post-processing to reduce noise
+  // from results of pixel-based classification
+  
+/* Section 3A: Dilation & Erosion */
+
+  // DILATION: expanding areas of objects
+  // used when classification underestimates
+  // actual distribution of object (e.g. veg)
+  // in GEE, use ee.Reducer.max()
+var max = veg.reduceNeighborhood({
+    reducer: ee.Reducer.max(),
+    kernel: uniformKernel
+});
+Map.addLayer(max, binaryViz,
+    'Dilation using Max', 0);
+    
+  // output: more area classified as veg
+  // to explore effect of dilation, can also
+  // increase kernel radius or
+  // use reduceNeighborhood() repeatedly
+  
+  // GEE also has shortcut APIs for
+  // common reduceNeighborhood actions
+  // focalMean(), focalMedian(), focalMode()
+  // plus focalMax() and focalMin()
+
+  // EROSION: decrease size of patches
+  // in GEE, use min() (opposite of dilation)
+var min = veg.reduceNeighborhood({
+    reducer: ee.Reducer.min(),
+    kernel: uniformKernel
+});
+Map.addLayer(min, binaryViz,
+    'Erosion using Min', 0);
+  
+  // output: less area classified as veg
+  
+/* Section 3B: Opening & Closing */
+
+  // OPENING: removing unwanted small patches
+  // done by erosion followed by dilation
+  // example: dilate our eroded image
+var openedVeg = min.reduceNeighborhood({
+    reducer: ee.Reducer.max(), // dilation
+    kernel: uniformKernel
+});
+Map.addLayer(openedVeg, binaryViz,
+    'Opened Image', 0);
+    
+  // expected output: tiny patches removed
+  // compared to orig vegetation map
+  // eroded > opened > dilated
+    
+  // CLOSING: removing holes w/in patches
+  // done by dilation followed by erosion
+  // example: erode our dilated image
+var closedVeg = max.reduceNeighborhood({
+    reducer: ee.Reducer.min(),
+    kernel: uniformKernel
+});
+Map.addLayer(closedVeg, binaryViz,
+    'Closed Image', 0);
+    
+  // output: holes in vegetation closed
+  // again, erosion > closed > dilation
+  
+  // effect of morphological operations
+  // adjustable via kernel size & shape
+  // or by applying operations repeatedly
+  // as is often done IRL to balance
+  // class accuracy w/ class cohesion
+  
+/* Section 4: Texture */
+
+  // last group of neighborhood operations
+  // meant to detect or enhance TEXTURE of image
+  // texture metrics use complex, nonlinear
+  // calculations using neighborhood pixel values
+  
+  // irl, texture among cues we use as we look
+  // at an RS image to identify features
+  // e.g. tree cover type, canopy cover, crops
+  
+  // texture metrics can be used on their own
+  // or as inputs to other RS analyses
+  // e.g. regression, classification, etc.
+  // many texture analysis fxns present in GEE
+  
+/* Section 4A: Std. Dev. & Entropy */
+
+  // STANDARD DEVIATION (SD) measures
+  // spread of image values w/in neighborhood
+  // textureless = only 1 value = SD=0
+  // much texture = many values = high SD
+  // SD value affected by magn. of nbr. values
+  
+  // example: compute neighborhood SD for NAIP
+  // 1) define square kernel w/ radius=7m
+var bigKernel = ee.Kernel.square({
+    radius: 7,
+    units: 'meters'
+});
+
+  // 2) apply stdDev() reducer w/ kernel
+var sd = imageNAIP
+    .select('N')
+    .reduceNeighborhood({
+      reducer: ee.Reducer.stdDev(),
+      kernel: bigKernel
+});
+
+  // 3) display stdDev result
+Map.addLayer(sd, {
+    min: 0,
+    max: 70
+}, 'NIR SD', 0);
+
+  // expected output:
+  // blacker=lower SD=more homogeneous
+  
+  // ENTROPY: index of value diversity in neighborhood
+  // used for discrete values (vs continuous for SD)
+  // in GEE, use entropy() fxn w/ kernel
+  
+  // example: get neighborhood entropy for NAIP
+  // 1) use int() to cast px values as integers
+  // cos entropy needs 32-bit integers or lower
+var intNAIP = imageNAIP.int();
+
+  // 2) compute entropy in neighborhood
+var entropy = intNAIP
+    .select('N')
+    .entropy(bigKernel);
+Map.addLayer(entropy, {
+    min: 1,
+    max: 3
+}, 'NIR Entropy', 0);
+
+  // output: lower entropy=homogeneous
+  
+/* Section 4B: Gray-Level Co-
+   Occurrence Matrices (GLCM) */
+   
+  // GRAY-LEVEL CO-OCCURRENCE MATRIX (GLCM)
+  // based on gray-scale images (e.g. indiv bands)
+  // evaluates co-occurrence of similar values
+  // horizontally, vertically, and diagonally
+  
+  // formally, GLCM computed by forming an
+  // MxM matrix for image (M=possible DN values)
+  // where each entry i,j is frequency
+  // at which DN=i is adjacent to DN=j
+  
+  // in short, matrix shows relationship
+  // between values of two adjacent pixels
+  // once GLCM is calculated, many metrics
+  // of texture can be computed from matrix
+  
+  // example: contrast (per band)
+  // in GEE, we use glcmTexture() function
+  // to calculate 14+4 GLCM metrics
+  // each band of GLCM image is a diff. metric
+  // input needs to be integer
+  
+  // example: GLCM contrast for NAIP
+  // we use same integer NAIP layer as earlier
+  // and neighborhood size = 7
+var glcmTexture = intNAIP
+    .glcmTexture(7);
+print('GLCM Texture Metrics: ', glcmTexture);
+
+  // display contrast for R, G, and B bands
+  // ^ a measure of local contrast in image
+var contrastViz = {
+    bands: ['R_contrast',
+            'G_contrast',
+            'B_contrast'],
+    min: 40,
+    max: 1000
+};
+Map.addLayer(glcmTexture, contrastViz,
+    'RGB Contrast NAIP', 0);
+    
+  // output: highlights areas w/ high contrast
+  // eg red lines = big change in R reflectance
+  
+/* Section 4C: Spatial Statistics */
+
+  // SPATIAL STATISTICS describes distribution
+  // of events across space; used a lot in RS
+  // for anomaly detection, terrain segmentation
+  // and in this chapter, texture analysis
+  
+  // two cool texture metrics from spatial statistics
+  // are local Moran's I and local Geary's C
+  
+  // example: local Geary's C for NAIP image
+  // first, create 9x9 kernel
+  
+  // create list of weights per row of 9x9 kernel
+var list = [1, 1, 1, 1, 1, 1, 1, 1, 1];
+  // create center row, w/ center pixel=0
+var centerList = [1, 1, 1, 1, 0, 1, 1, 1, 1];
+  // assemble weights as 2D matrix
+var matrix = [list, list, list,
+              list, centerList, list,
+              list, list, list];
+  // create kernel from weights matrix
+  // using ee.Kernel.fixed to customize kernel
+  // non-zero weights represent spatial neighborhood
+var kernel = ee.Kernel.fixed({
+    width: 9, height: 9,
+    weights: matrix,
+    x: -4, y: -4, 
+    normalize: false
+});
+
+  // next, we get max among 4 NAIP bands
+  // n use it w/ kernel to get local Geary's C
+var maxBands = imageNAIP
+    .reduce(ee.Reducer.max());
+    
+  // convert neighborhood to multi-band
+  // each band = 1 pixel in neighborhood
+  // denoted by x-y coordinate w/in kernel
+var neighBands = maxBands
+    .neighborhoodToBands(kernel);
+  
+  // we will manually calculate Geary's C
+  // using subtract(), pow(), sum(), and divide()
+  // cos GEE has no built-in fxn for it
+var gearys = maxBands
+    .subtract(neighBands)
+    .pow(2)
+    .reduce(ee.Reducer.sum())
+    .divide(Math.pow(9, 2));
+Map.addLayer(gearys, {
+    min: 20,
+    max: 2500
+}, "Geary's C", 0);
+
+/* Section 5: Synthesis */
+
+  // A) Classify raw imagery (RGB-NIR)
+  // B) Classify images that underwent
+    // neighborhood transformations
+  // C) Use one or more morphological
+    // transformations to clean up image
+    
+  // 1) compare classification of raw-imagery
+    // w/ transformed imagery
+  // 2) compare unaltered image classification
+    // w/ post-morphotransformed classification
+
+  // extract GLCM variance for each band
+  // then add to orig. spectral bands
+var glcmVarNAIP = intNAIP
+    .addBands(glcmTexture,
+      ['R_var', 'G_var', 'B_var', 'N_var']);
+
+  // put intNAIP & glcm-infused NAIP
+  // into single image collection
+  // to which is applied the cluster fxn
+var imageList = ee.ImageCollection([
+    intNAIP, glcmVarNAIP]);
+
+var clusterImages = function(image){
+    var sample = image
+    .sample({
+        region: imageNAIP.geometry(),
+        scale: imageNAIP.projection().nominalScale(), 
+        numPixels: 2000
+});
+  // instantiate clusterer and train it
+  // number of clusters = 3
+  // healthy veg, yellow veg, bare/impervious
+var kMeans = ee.Clusterer.wekaKMeans({
+    nClusters: 4,
+    seed: 10
+}).train(sample);
+  
+  // apply k-means clusterer to image
+return image.cluster(kMeans);
+};
+
+  // apply cluster function to image list
+  // then cast as list to facilitate extraction
+  // of specific images
+var clusteredList = imageList
+    .map(clusterImages)
+    .toList(999);
+print('List of Clustered Images:',
+    clusteredList);
+
+  // assign list elements to variable names
+var rawClustered = ee.Image(clusteredList.get(0));
+var glcmClustered = ee.Image(clusteredList.get(1));
+
+  // display both cluster layers in map
+var clusterViz = {
+    min: 0,
+    max: 3,
+    palette: ['green', 'yellow', 'orange', 'red']
+};
+Map.addLayer(rawClustered, clusterViz,
+    'Raw NAIP k-Means Clustered');
+Map.addLayer(glcmClustered, clusterViz,
+    'GLCM Var NAIP k-Means Clustered');
+    
+// var clusterPts = rawClustered.sample({
+//     region: imageNAIP.geometry(),
+//     numPixels: 400,
+//     scale: imageNAIP.projection()
+//           .nominalScale().multiply(50),
+//     seed: 10
+// });
+
+// var rawChart = ui.Chart.image.regions({
+//     image: imageNAIP,
+//     regions: clusterPts,
+//     reducer: ee.Reducer.mean(),
+//     seriesProperty: 'cluster'
+// }).setOptions({
+//     hAxis: {title: 'Bands'},
+//     vAxis: {title: 'Reflectance'}
+// }).setChartType('LineChart');
+// print('Raw NAIP Spectral Signature', rawChart);

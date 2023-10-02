@@ -1,0 +1,332 @@
+/* Chapter F4.0: Filter, Map, Reduce */
+
+  // paradigm-shifting feature of GEE: the
+  // ability to access DECADES of imagery
+  // w/o having to download to a local disk
+  // which used to limit RS projs to 2-3 images
+  // w GEE< users can access 10s-1000s of images
+  // to understand status of earth across decades
+  
+  // in this chap: filters, fxns, & aggregates
+  // using ImageCollections: a key data type
+  // in GEE that isnt present in desktop RS
+  
+  // so far, we've only explored single images
+  // w/ diff band combos, from diff datasets
+  // & image processing principles done in GEE
+  
+  // each image was pulled from larger set of
+  // images taken from the same sensor, using
+  // few ways to narrow down no. of images
+  // to view for inspection or manipulation
+  
+  // in Part F4.0, we move from single images
+  // to entire image collections (unique to GEE)
+  // ability to manipulate whole collections
+  // sets GEE apart & boosts RS analytical powers
+  
+  // when detecting & analyzing change on earth,
+  // we proceed thru a 3-step workflow
+  // 1) filter: selecting imgs based on criteria
+  // 2) map: automating image manipulation
+  // 3) reduce: estimate traits of time series
+  
+  // example: going to store to buy milk
+  // 2 criteria for where to buy: price & location
+  // 1) milk store needs to be close to home
+    // code: AllStoresOnEarth (collection)
+        //   .filterNearbyStores (filter)
+        //   .filterStoresWithMilk (filter)
+  // 2) must be cheapest milk available
+    // contact each store to find min. price
+    // to check if it fits w/in budget
+        //  .getMilkPricesFromEachStore (map)
+        //  .determineTheMinimumValue (reduce)
+        
+  // list of steps might be obvious, but
+  // choice & order of operations is CRITICAL
+  // if map first, u process LARGE collections
+  // same answer in the end, but way less efficient
+  // and would need more info tracked midway
+  
+  // in short, order of operations must be:
+  // FILTER >> MAP (a fxn) >> REDUCE (F-M-R)
+  // this is how image collections are handled
+  
+/* Section 1: Filtering Image Collections */
+
+  // step 1: filtering an image collection
+  // to get a smaller subset of images
+  // criteria: date, location, other characteristics
+  
+  // GEE API has some filters for ImageCollections
+  // using spatio-temporal or attribute characteristics
+  
+  // 3 examples of filtering Landsat 5 collection
+  // then assessing size of resulting set
+  
+  // 1) FilterDate: filters by date criteria
+var imgCol = ee.ImageCollection(
+    'LANDSAT/LT05/C02/T1_L2'); // 1863397
+// print('All Images Ever:', imgCol.size());
+
+  // how many images were taken in 2000s?
+var startDate = '2001-01-01';
+var endDate = '2001-12-31';
+var imgColFilterDate = imgCol
+    .filterDate(startDate, endDate);
+// print('All Images 2000-2010:',
+//     imgColFilterDate.size()); // 645437
+
+  // 2) FilterBounds: filter by location
+  // which images are near a specified point?
+var ShanghaiImage = ee.Image(
+    'LANDSAT/LT05/C02/T1_L2/LT05_118038_20000606');
+// Map.centerObject(ShanghaiImage, 9);
+
+var imgColFilterDateHere = imgColFilterDate
+    .filterBounds(Map.getCenter());
+print('All Images Here, 2000-2010:',
+    imgColFilterDateHere.size()); // 125
+  // number changes based on where map is
+  // e.g. metro manila = 117 images
+  
+  // 3) filter by other image metadata
+  // e.g. cloud cover (img-level property)
+  // for Landsat 5, 'CLOUD_COVER'
+  // we can extract properties using get()
+  
+  // we will further filter our image
+  // collection by img-lvl cloud cover score
+  // using filterMetadata() function
+  // ^ DEPRECATED; use filter() w/
+  // ee.Filter.eq(), ee.Filter.gte(), etc.
+  
+  // here, we remove images w/ >50% cloudiness
+  // might wanna keep those in IRL studies
+var l5LowCloudImages = imgColFilterDateHere
+    .filterMetadata('CLOUD_COVER', 'less_than', 50);
+print('<50% Clouds Here, 2000-2010:',
+    l5LowCloudImages.size()); // 83 images
+    
+  // order of filters also impt for efficiency
+  // filterBounds() 1st if ROI << globe
+
+  // in GEE, filter commands can be 'chained'
+  // executed in order of writing
+  
+  // below, we chain filters in same order
+  // as we did kanina, giving same size as b4
+var chainFilterSet = imgCol
+    .filterDate(startDate, endDate)
+    .filterBounds(Map.getCenter())
+    .filter(ee.Filter.lt('CLOUD_COVER', 50));
+print('Chained: <50% in this area, 2000-2010:',
+    chainFilterSet.size());
+  
+  // here, same resulting collection
+  // but filterBounds() implemented 1st
+var efficientFilterSet = imgCol
+    .filterBounds(Map.getCenter())
+    .filterDate(startDate, endDate)
+    .filter(ee.Filter.lt('CLOUD_COVER', 50));
+print('Efficient: <50% in this area, 2000-2010:',
+    efficientFilterSet.size());
+    
+  // each of sets of operations = same result
+  // & finish at roughly same time cos small lng
+  // BUT, for bigger datasets using more memory
+  // efficiency becomes much more important
+  
+  // in GEE, always good practice to filter w/
+  // filterBounds() first, then w metadata filters
+  // in order of decreasing (!) specificity
+  
+/* Section 2: Mapping Over Image Collections */
+
+  // in chap F3.1, we calculated EVI once
+  // on single image (in small steps)
+  // what if we wanted to compute EVI
+  // for every image in a collection?
+  
+  // in GEE, this is done w map() command
+  // which repeats an operation per element
+  // think: asking milk prices per store
+  
+  // diff uses of "map" in cloud-based RS:
+  // 1) map panel: where images are shown
+  // 2) Map (EE object): capitalized, w/ fxns
+  // 3) .map(): doing action repeatedly on set
+      // aka "mapping over" the set
+  
+  // loop: used in other programming languages
+  // in GEE: create fxn -> map over collection
+  // fxn: input img -> compute -> return img
+  // when mapped to coll., output is ALSO COLL.
+  
+  // e.g. fxn to threshold values per image
+  // output of map(): collection of mask imgs
+  // e.g. fxn to compute index (EVI) per img
+var makeL5EVI = function(oneL5Image) {
+    // compute EVI for any Landsat 5 image
+    // specific to L5 cos of band numbers
+    // so doesn't work for other sensors
+    
+    // use expression() to calculate EVI
+    var landsat5EVI = oneL5Image.expression({
+        // define arithmetic expression
+        expression: '2.5 * ((NIR - RED) / (NIR + 6 * RED - 7.5 * BLUE + 1))',
+        map: { // select the bands used
+            'NIR': oneL5Image.select('SR_B4').divide(10000),
+            'RED': oneL5Image.select('SR_B3').divide(10000),
+            'BLUE': oneL5Image.select('SR_B1').divide(10000)
+        }
+    });
+    
+    // return output EVI images
+    return (landsat5EVI);
+};
+
+  // NOTE: band names unique per collection
+  // e.g. this fxn won't work on image
+  // that doesn't have band 'SR_B4'
+  // so it only works for landsat 5
+  
+  // makeL5EVI: a fxn built to receive image
+  // calculate EVI, then return 1-band image
+  
+  // wrong way: call each image name as variable
+  // then apply fxn to each, then re-collect
+  // ^ prone to mistakes (typos, omissions, etc)
+  
+  // right way: using .map() command
+  // e.g. print info abt cloud-filtered collection
+  // display it, execute command, then explore
+var l5EVIimages = efficientFilterSet
+    .map(makeL5EVI);
+print('Verify Same No. of Images:',
+    l5EVIimages.size());
+print(l5EVIimages);
+Map.addLayer(l5EVIimages, {},
+    'Landsat 5 EVI Images', 1, 1);
+    
+  // output: grayscale image, but edges show
+  // other images behind it, like a stack
+  // this is output collection of makeL5EVI
+  
+  // use inspector panel to view values of
+  // entire image collection (time series)
+  // which shows a chart of EVI values over time
+  
+/* Section 3: Reducing an Image Collection */
+
+  // step 3 of FMR paradigm: reducing an
+  // image collection to get meaningful values
+  // e.g. reduce list of milk prices to get min
+  // GEE API has reducers for many summary stats
+  
+  // after EVI calculation via map() command,
+  // each loc (pixel) has list of EVI values on it
+  // size of list depending on filters used
+  
+  // compute mean EVI value per pixel
+  // for entire image collection
+var l5EVImean = l5EVIimages
+    .reduce(ee.Reducer.mean());
+print('Mean EVI', l5EVImean);
+Map.addLayer(l5EVImean, {
+    min: -1,
+    max: 2,
+    palette: ['red', 'white', 'green']
+}, 'Mean EVI');
+
+  // using same principle, we get median
+  // of EVI values per pixel over collection
+var l5EVImedian = l5EVIimages
+    .reduce(ee.Reducer.median());
+print('Median EVI', l5EVImedian);
+Map.addLayer(l5EVImedian, {
+    min: -1,
+    max: 2,
+    palette: ['red', 'white', 'green']
+}, 'Median EVI');
+
+  // output: mean much noisier than median
+  // cos it is affected by outlier values
+  // hence, for collections, use median()
+  
+  // GEE has more reducers that work with
+  // image collections to get various statistics
+  // reducers not limited to returning 1 value
+  // e.g. minMax() returns 2 band (min & max)
+  
+  // so far, reducers here are pixel-based
+  // in next chapters, meron din neighborhood
+  // -based, like in chap f3.2!!
+  
+  // pixel-based: aggregate over time series
+  // neighborhood: aggregate over neighborhood
+  
+  // CONCLUSION: filter-map-reduce paradigm
+  // to 1) sift thru, 2) operate on, and
+  // 3) summarize large sets of images
+  
+  // a) filter: select images by some criteria
+  // b) map: apply set operations to each image
+  // c) reduce: summarize elements to 1 stat
+  
+  // in next chapters, we will encounter
+  // this FMR paradigm repeatedly
+  // handling image collections accdg to needs
+  // FMR paradigm -> cooler projects in GEE
+  
+/* Part 4: SYNTHESIS */
+
+  // 1) compare mean & median images visually
+  // and inspect EVI values per each
+  // which better represents data set?
+    // water pixel: mean >> median
+    // median is better cos low dapat
+    // mean affected by outlier values
+    
+  // 2) adjust filter to diff % cloud cover
+  // or use diff date range; what effects
+  // does it have on no. of images
+  // and how the reductions look visually?
+    // lower cloud cover % = less images
+    // kase mas strict na yung filter
+    // diff dates = diff cloud cover %
+    // depende sa season weather-wise
+    
+  // 3) explore ee.Filter options in API docs
+  // and select diff filter of interest
+  // comment on its impact when used
+    // not gonna use these, but useful to note
+    // that there are other options for
+    // date filters e.g. ee.Filter.calendarRange
+    // if u wanna filter by specific months
+    // as well as other location filters
+    // ^ classic spatial query predicates
+    
+  // 4) edit EVi fxn so that it returns orig
+  // image w/ EVI band appended to it
+  // return (oneL5image.addBands(landsat5EVI)
+  // how does it affect median reducer?
+  // in what conditions is EVI = 0?
+    // returns an error cos bawal palette
+    // once that's handled, image returned
+    // is weird... EVI values now part of
+    // list of values alongside reflectance
+    // so image is like true-color but
+    // filtered w/ red so ayun
+    // idt any pixel here = 0 cos
+    // EVI band turns into mere outlier
+    // cos reflectances are very high
+    
+  // 5) set birthyear & birth loc as filters
+  // filter by cloud cover then reduce
+  // to find median EVI; describe image
+  // and how well it represents value range
+    // very noisy & full of error
+    // cos it's a tiny date range
+    // in a very cloudy region too

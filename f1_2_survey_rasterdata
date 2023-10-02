@@ -1,0 +1,540 @@
+/* Chapter F1.2: Survey of Raster Datasets */
+
+  // image collections: organize many diff. images
+  // into one larger data storage structure
+  
+  // image collections include info about:
+  // location, date collected, etc. of each image
+  // which we can sift thru for the exact image we need
+  
+  // diff. types of image collections available in GEE
+  // 1) collections of indiv. satellite images
+  // 2) pre-made composites of multiple images
+  // 3) classified LULC maps, 4) weather data
+  // 5) other non-optical (abstract) data sets
+  
+/* Section 1: Image Collections:
+   An Organized Set of Images */
+   
+  // in GEE, ImageCollection is a special data type
+  // with its own operations available in GEE API
+  // they can also be viewed with Map.addLayer
+   
+  // Chapter F1.2 is a brief tour of the GEE Catalog
+  // which has decades of imagery & other datasets
+  // how do we view them & work with basic attributes?
+   
+  // example 1: Landsat 8
+   
+  // collection of scenes from OLI sensor on Landsat 8
+  // launched in 2013, the latest installment in the
+  // Landsat series of satellites starting in 1972
+   
+  // import Landsat 8 raw collection
+var landsat8 = ee.ImageCollection('LANDSAT/LC08/C02/T1');
+  
+  // print size of Landsat 8 dataset
+print('Landsat 8 Imag Collection Size: ', landsat8.size());
+
+  // try to print the image collection
+  // WARNING: running this print code will produce an
+  // error cos the console can print >=5000 elements.
+// print(landsat8);
+
+  // add Landsat 8 dataset to the map as a mosaic
+  // it is already sorted by time, so the most
+  // recent pixel is the one displayed.
+/*
+Map.addLayer(
+  landsat8,
+  {
+    bands: ['B4', 'B3', 'B2'],
+    min: 5000,
+    max: 15000
+  },
+  'Landsat 8 Image Collection');
+*/
+  
+  // expected output: cloud cover, striped look
+  // GEE displays each image on top of each other
+  // obvious that these are not yet ready for analysis
+  
+  // printed size on console constantly growing
+  // as OLI on Landsat 8 takes more images in future
+  // printing the ImageCollection returned an error
+  // cos it tried to print names of every image
+  // this is intentional! don't print a million names!
+  
+  // ImageCollection data type in GEE has many ways
+  // to be filtered, which can extract specific images
+  
+  // 1) filter by date: narrows date range of collection
+var landsatWinter = landsat8
+                    .filterDate('2020-12-01', '2021-03-01');
+
+Map.addLayer(
+  landsatWinter,
+  {
+    bands: ['B4', 'B3', 'B2'],
+    min: 5000,
+    max: 15000
+  },
+  'Winter Landsat 8',
+  0);
+  
+print('Winter Landsat 8 Collection Size: ',
+  landsatWinter.size());
+  
+  // printed size in console for winter much smaller
+  // cos we only picked images within the date range
+  
+  // 2) filter by location: narrows location of image
+
+  //create a GEE point object
+var pointMN = ee.Geometry.Point([121.037, 14.642]);
+
+  // filter collection by location using the point
+var landsatMN = landsatWinter
+                .filterBounds(pointMN);
+Map.addLayer(
+  landsatMN,
+  {
+    bands: ['B4', 'B3', 'B2'],
+    min: 5000,
+    max: 15000
+  },
+  'Manila Landsat 8', 0);
+  
+  // add point to map to see where it is
+Map.addLayer(pointMN, {}, 'Point Manila', 0);
+
+print('Manila Winter Landsat 8 Collection Size: ',
+      landsatMN.size());
+  
+  // printed size for landsatMN MUCH smaller
+  // cos now filtered by date AND location
+  // only images intersecting point is included
+  
+  // 3) selecting the first image: first() function
+  // places 1st image in collection on the map
+  // often used for preliminary inspection
+  // for satellite imagery, 1st = earliest taken
+  
+  // select 1st image in filtered collection
+var landsatFirst = landsatMN.first();
+
+  // display 1st image in filtered collection
+  // Map.centerObject to center map on image
+  // zoom lvls go from 0 (out) to 24 (in)
+Map.centerObject(landsatFirst, 7);
+Map.addLayer(landsatFirst,
+  {
+    bands: ['B4', 'B3', 'B2'],
+    min: 5000,
+    max: 15000
+  },
+  'First Manila Landsat 8', 0);
+  
+  // no series line chart when inspected
+  // cos it is only 1 image on 1 date
+  // .first()  = first image is displayed
+  // other collections = latest is displayed
+
+/* Section 2: Collections of Single Images */
+
+  // we previously worked with raw Landsat 8 images
+  // which already had impt corrections done for us
+  // however, RS ppl have created more corrections
+  // that raise accuracy & consistency of analyses
+  
+  // results of each of these image processing paths
+  // is stored in a distinct ImageCollection in GEE
+  
+  // example 1: atmospheric corrections
+  // minimize effect of atmosphere bet. Earth & satellite
+  // effect 1: affecting amt. of sunlight hitting Earth
+  // effect 2: affecting EM energy from Earth to satellite
+  
+  // images from Landsat 8 & other sensors automatically
+  // treated w/ latest atmospheric correction algorithms
+  // creating product called surface reflectance (SR)
+  
+  // SR estimates ratio of upward radiance FROM earth
+  // to downward radiance TO earth, imitating what
+  // sensor would see if it were only few ft off ground
+  
+  // example: SR image over san francisco, california
+  
+  // create GEE Point object over San Francisco
+var pointSF = ee.Geometry.Point([-122.45, 37.75]);
+
+  // import Landsat 8 surface reflectance collection
+  // then filter by date & location then select 1st image
+var landsat8SRimage = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+    .filterDate('2014-03-18', '2014-03-19')
+    .filterBounds(pointSF)
+    .first();
+    
+  // print metadata of the single image
+print('Landsat 8 SR Image', landsat8SRimage);
+
+  // band names are different than from raw images
+  // 'SR_B*' vs. 'B*' (SR = surface reflectance)
+  // date also present in image id as string subset
+  // '20140318' = image was from march 18, 2014
+  
+  // center map to first image
+// Map.centerObject(landsat8SRimage, 8);
+
+  // add 1st image to the map
+Map.addLayer(landsat8SRimage,
+  {
+    bands: ['SR_B4', 'SR_B3', 'SR_B2'],
+    min: 7000,
+    max: 13000
+  },
+  'Landsat 8 SR',
+  0);
+  
+  // add raw image over SF for comparison
+var landsat8rawImage = ee.ImageCollection("LANDSAT/LC08/C02/T1")
+    .filterDate('2014-03-18', '2014-03-19')
+    .filterBounds(pointSF)
+    .first();
+
+print('Landsat 8 Raw Image', landsat8rawImage);
+
+Map.addLayer(landsat8rawImage,
+  {
+    bands: ['B4', 'B3', 'B2'],
+    min: 5000,
+    max: 15000
+  },
+  'Landsat 8 Raw',
+  0);
+  
+  // expected output: SR image more colorful
+  // raw image bluer overall cos atmosphere
+  
+/* Section 3: Pre-Made Composites */
+
+  // pre-made composites take indiv. images from
+  // collections across set area or time period
+  // and assembles them into a single layer
+  // done for diff. datasets: satellite images,
+  // climate info, forest/vegetation info, etc.
+  
+  // w/in an image collection over one area
+  // image quality varies: some good, some bad
+  // due to differences in atmospheric conditions
+  
+  // compositing process takes all these images
+  // picks best ones, then stitches them into 1 layer
+  // compositing period can vary by use & dataset
+  // can be daily, monthly, and/or yearly
+  
+  // can be done manually in GEE (advanced)
+  // but some pre-made composites available in Catalog
+  
+  // example: composites from MODIS data (Terra & Aqua)
+  // diff. MODIS bands have data at diff. pixel sizes
+  // for vis-nir bands, lowest common resol. is 500m
+  
+  // import MCD43A4.006 MODIS Nadir BRDF-Adjusted
+  // Reflectance Daily 500m dataset & view an image
+  // produced daily based on 16-day retrieval period
+  // 8 days before & after nominal compositing date
+  
+  // it picks best representative pixels from this period
+  // pixels closer to target date given higher priority
+  
+  // import MODIS data of daily BRDF-corrected reflectance
+var modisDaily = ee.ImageCollection('MODIS/006/MCD43A4')
+
+  // filter dataset  to a recent date
+var modisDailyRecent = modisDaily.filterDate('2021-11-01');
+
+  // add dataset to the map
+var modisVis = {
+  bands: [
+    'Nadir_Reflectance_Band1',
+    'Nadir_Reflectance_Band4',
+    'Nadir_Reflectance_Band3'
+    ],
+    min: 0,
+    max: 4000};
+Map.addLayer(modisDailyRecent,
+  modisVis,
+  'MODIS Daily Composite',
+  0);
+  
+  // expected output: cloudless composite of MODIS data
+  // some pixels w/ no data: persistently cloudy areas
+  // w/ no clear pixels w/in date range chosen
+  
+  // some MODIS bands are used for wildfire detection
+  // a monthly composite for burned areas available in GEE
+  
+  // import MODIS monthly burned areas dataset
+var modisMonthly = ee.ImageCollection('MODIS/006/MCD64A1');
+
+  // filter dataset to recent month during fire season
+var modisMonthlyRecent = modisMonthly.filterDate('2021-08-01');
+
+  // add dataset to the map
+Map.addLayer(modisMonthlyRecent, {}, 'MODIS Monthly Burn', 0);
+
+/* Section 4: Atmospheric Data */
+
+  // satellites can also collect info on atmosphere:
+  // climate, weather, certain compounds, etc.
+  // leverage how diff. compounds reflect EM
+  // when hit w/ sunlight in various wavelengths
+  
+  // 1) methane (CH4) reflects 760mm part of spectrum
+  // ESA's CH4 dataset from Sentinel-5 available in GEE
+  
+  // add methane data from 1st date of collection to map
+  // use select() to select methane-specific band of data
+  // and use color palette to display band in color
+  // min = black, max  = red, in-between = order of colors
+  
+  // import sentinel-5 methane dataset
+var methane = ee.ImageCollection('COPERNICUS/S5P/OFFL/L3_CH4');
+
+  // filter methane dataset by band, date, 1st image
+var methane2018 = methane.select(
+    'CH4_column_volume_mixing_ratio_dry_air')
+    .filterDate('2018-11-28', '2018-11-29')
+    .first();
+    
+  // make visualization for filtered methane data
+var methaneVis = {
+    palette: ['black', 'blue', 'purple', 
+      'cyan', 'green', 'yellow', 'red'
+    ],
+    min: 1770,
+    max: 1920
+};
+
+  // center the map to data
+// Map.centerObject(methane2018, 3);
+
+  // add methane dataset to the map
+Map.addLayer(methane2018, methaneVis, 'Methane', 0);
+
+  // 2) weather & climate datasets also available
+  // e.g. European Center for Medium-Range Weather
+  // Forecast Reanalysis (ERA5) dataset
+  
+  // import ERA5 monthly dataset
+var era5Monthly = ee.ImageCollection('ECMWF/ERA5/MONTHLY');
+
+  // filter dataset to january 2018
+var era5MonthlyTemp = era5Monthly
+    .select('mean_2m_air_temperature')
+    .filterDate('2018-01-01', '2018-01-31')
+    .first();
+    
+  // add ERA dataset to map
+Map.addLayer(era5MonthlyTemp,
+    {
+      palette: ['yellow', 'red'],
+      min: 245,
+      max: 310
+    },
+    'ERA5 Mean Monthly Temp', 0);
+
+  // units in kelvin: degC + 273.15
+  // impt to pick right value range
+  // to ensure best visualization of data
+  
+/* Section 5: Pre-Classified Land Cover Data */
+
+  // pre-classified LULC maps also available in GEE
+  // instead of showing EM spectrum reflectance
+  // land cover maps use EM reflectance to assign a label
+  // to each pixel (e.g. vegetation, bare soil, water, etc.)
+  
+  // 1) ESA WorldCover: global land cover map for 2020
+  // based on Sentinel-1 & Sentinel-2 data
+  // uses 11 land cover classes (e.g. built-up, crops, mangroves)
+  
+  // import ESA WorldCover dataset
+var worldCover = ee.ImageCollection(
+    'ESA/WorldCover/v100').first();
+    
+  // center the Map
+Map.centerObject(worldCover, 3);
+
+  // add worldCover layer to map
+  // band 'Map' already has palette for LULC classes
+Map.addLayer(worldCover,
+    {
+      bands: ['Map']
+    },
+    'WorldCover', 0);
+    
+  // expected output: categorical color scheme
+  // vs. complex gradients of satellite imagery
+  
+  // 2) Global Forest Change = pre-classified forest cover
+  // focused on % of tree cover in base year of 2000
+  // and how it changed over time (to 2020)
+  
+  // import Hansen Global Forest Change dataset
+var globalForest = ee.Image(
+    'UMD/hansen/global_forest_change_2020_v1_8');
+    
+  // create visualization for tree cover in 2000
+var treeCoverViz = {
+  bands: ['treecover2000'],
+  min: 0,
+  max: 100,
+  palette: ['black', 'green']
+};
+
+  // add the 2000 tree cover image to the map
+Map.addLayer(globalForest, 
+    treeCoverViz, 
+    'Hansen 2000 Tree Cover', 0);
+
+  // create visualization for year of tree loss
+  // over the past 20 years (value = year of loss)
+  // yellow = earlier, red = later (closer to 2020)
+var treeLossYearViz = {
+  bands: ['lossyear'],
+  min: 0,
+  max: 20,
+  palette: ['magenta', 'red', 'yellow']
+};
+
+  // add 2000-2020 tree cover loss image to map
+Map.addLayer(globalForest, 
+    treeLossYearViz, 
+    '2000-2020 Year of Loss', 0);
+    
+/* Section 6: Other Datasets */
+
+  // other datasets also present in GEE data catalog
+  // incl. gridded population, terrain, geophysical data, etc.
+  
+  // 1) gridded population of the world dataset
+  // estimates human pop. for each grid cell across world
+  
+  // add 2000 population count layer
+  // and use predefined palette populationPalette
+  // a list of 6-digit strings for additive RGB colors
+  // lighter = lower, darker = higher
+  
+  // import & filter gridded population dataset
+var griddedPopulation = ee.ImageCollection(
+    'CIESIN/GPWv4/population-count')
+    .first();
+
+  // pre-define the palette
+var populationPalette = [
+  'ffffe7',
+  '86a192',
+  '509791',
+  '307296',
+  '2c4484',
+  '000066'
+];
+
+  // center the Map
+// Map.centerObject(griddedPopulation, 3);
+
+  // add population data to map
+Map.addLayer(griddedPopulation,
+    {
+      min: 0,
+      max: 1200,
+      'palette': populationPalette
+    },
+    'Gridded Population',
+    0);
+    
+  // expected output: cream = lower, dark blue = higher
+  // larger range = less contrast (depende sa data)
+  // higher min = more light color
+  // higher max = less dark color
+  // lesson: ensure viz range appropriate to data range
+  
+  // 2) digital elevation models use remote sensing
+  // to estimate elevation at each location
+  // GEE catalog has both global & local DEMS
+  
+  // 1 global DEM available is NASADEM dataset
+  // DEM produced from a NASA mission
+  // another example is DEM from USGS SRTM
+  
+  // import NASA DEM dataset
+var nasaDEM = ee.Image('NASA/NASADEM_HGT/001');
+
+  // add elevation layer to map
+Map.addLayer(nasaDEM,
+    {
+      bands: ['elevation'],
+      min: 0,
+      max: 2000 // default: 3000
+    },
+    'NASA DEM',
+    0, 0.7 /* default: 1 */);
+    
+  // expected output: grayscale DEM
+  // black = low, white = high
+  // grayscale gradient = sloping
+  
+/* Section 7: SYNTHESIS */
+
+  // find dataset near location via search bar
+  // import dataset then filter to 1 image
+  // then print metadata in console
+  // then add image to map
+  
+  // either 3 selected bands (RGB composite)
+  // or custom palette (for single band)
+
+  // import drought index to GEE
+  // then filter to april 2022 (summer)
+  // then pick first image of collection
+var droughtIndex = ee.ImageCollection(
+    "UTOKYO/WTLAB/KBDI/v1")
+    .filterDate('2022-04-01', '2022-04-30')
+    .first();
+
+  // print metadata into console
+  // expected data type: image
+print(droughtIndex);
+
+  // create visualization for drought index
+var droughtViz = {
+  bands: ['KBDI'],
+  min: 0,
+  max: 800,
+  palette: [
+    'blue',
+    'cyan',
+    'green',
+    'yellow',
+    'orange',
+    'red']
+};
+
+  // add drought index to map
+Map.addLayer(droughtIndex,
+    droughtViz,
+    'Drought Index April 2022',
+    1, 0.6);
+    
+  // expected output: single image
+  // in console: single KBDI value
+  // bluer = wetter, redder = drier
+  
+  // if collection, in console: series chart
+  // of KBDI values across date range
+  
+  // project idea: compare drought indices
+  // for april in last 3-5 years
+  // chapter f4 na ata yan though :')

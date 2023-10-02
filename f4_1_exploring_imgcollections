@@ -1,0 +1,386 @@
+/* Chapter F4.1: Exploring Image Collections */
+
+  // in this chap: how to explore img-colls, ie
+  // spatiotemporal extent, resolution, values
+  // stored in images, & image properties
+  // using maps, charts, and interactive tools
+  // and how to compute diff. statistics of
+  // values stored in img-colls via reducers
+  
+  // last chap: filer-map-reduce paradigm
+  // this chap: how to use ^ to understand
+  // variability of values in img-colls
+  
+  // sec 1 shows how time-dependent values
+  // in img-coll can be inspected via Code
+  // Editor UI after spatiotemporal filtering
+  
+  // sec 2 shows how image extent & no. can
+  // be visualized to better understand
+  // spatiotemporal extent of img-colls
+  
+  // sec 3 & 4 show how simple reducers (mean)
+  // and advanced reducers (percentiles) can be
+  // used to understand value distribution
+  // w/in a filtered image collection
+  
+/* Section 1: Filtering and Inspecting 
+   an Image Collection */
+   
+  // filter Landsat 8 collection to 2020
+  // over area of lisbon, portugal
+  // then select bands 6,5,4 for each image
+
+  // define ROI as point in lisbon
+  // and center map at that point
+var lisbonPt = ee.Geometry.Point(-9.169, 38.758);
+Map.centerObject(lisbonPt, 12);
+
+  // filter large Landsat 8 img-coll to just
+  // from yr 2020 around area of lisbon
+  // then select false-color bands (6,5,4)
+  // aka SWIR1, NIR, RED respectively
+var filteredIC = ee.ImageCollection(
+'LANDSAT/LC08/C02/T1_TOA')
+    .filterBounds(lisbonPt)
+    .filterDate('2020-01-01', '2021-01-01')
+    .select(['B6', 'B5', 'B4']);
+
+  // add filtered img-coll to map so we can
+  // inspect values via inspector tool
+Map.addLayer(filteredIC, {},
+    'TOA Image Collection', 0);
+  
+  // output: SWIR false color accentuating
+  // diff bet. concrete & vegetation, etc
+  // series in inspector tool shows values
+  // of 3 bands over time, for that pixel
+  
+  // series title shows img-coll has 16 imgs
+  // moving cursor along graphed lines
+  // shows that many distinct values (16)
+  // each w/ specific dates (= image)
+  
+  // we can show this chart automatically
+  // aka a time series chart
+  // using ui.Chart fxn in GEE API
+var chart = ui.Chart.image.series({
+    imageCollection: filteredIC,
+    region: lisbonPt,
+    reducer: ee.Reducer.mean(),
+    scale: 30 // why 10?
+});
+print(chart); // show chart in console
+
+/* Section 2: How Many Images Are There,
+   Everywhere on Earth? */
+
+  // what if we wanted to know how many valid
+  // observations are there per pixel worldwide
+  // for a given img-coll? ez to do in GEE API
+  
+  // GEE API has reducer fxns to summarize values
+  // to a single number per pixel (see F4.0)
+  // we can apply count() reducer to our img-coll
+  // w same dataset & date filter, but no loc filter
+  
+  // will assemble images all over world, then
+  // count no. of images per pixel, then add
+  // resulting count() img to map w/ a defined
+  // red-yellow-green palette stretched 0-50
+  
+  // count & show no. of observations
+  // in Landsat 8 collection for 2020
+  // select 1 band only cos count()
+  // counts every band passed to it
+var count = ee.ImageCollection(
+'LANDSAT/LC08/C02/T1_TOA')
+    .filterDate('2020-01-01', '2021-01-01')
+    .select(['B6'])
+    .count(); // simpler way to use reducers
+
+  // add white background to map and
+  // switch to HYBRID google basemap
+Map.addLayer(ee.Image(1), {
+    palette: ['white']
+}, 'White Background', false, 0.5);
+Map.setOptions('HYBRID');
+
+  // show image count in map
+Map.addLayer(count, {
+    min: 0,
+    max: 50,
+    palette: ['d7191c', 'fdae61', 
+    'ffffbf', 'a6d96a','1a9641']
+}, 'Landsat 8 Image Count (2020)', 0);
+
+  // center map at lisbon again
+  // but much more zoomed out
+Map.centerObject(lisbonPt, 5);
+
+  // output: checkered pattern in map
+  // cos of overlapping image footprints
+  // overlap east-west: taken at diff dates
+  // overlap north-south: ensures no gaps
+  
+  // greener near north pole = more imgs
+  // cos dun lagi dumadaan yung satellite
+  // less imgs sa tropical areas huhuhu
+  
+  // since each img stored distinctly in GEE,
+  // there can be 2 images from same day
+  // w/ same value for points in overlap areas
+  // there r ways to ignore duplicate values
+  // during RS analysis process IRL
+  
+  // why only select 1 band? count() counts
+  // every band passed to it, so if we used
+  // 7 bands, we would see same count x no.
+  // of times, where x = no. of bands
+  
+  // for own work, can also use diff reducers
+  // eg median, that will give diff useful answers
+  // for each band; see below for other reducers
+
+/* Section 3: Reducing Image Collections 
+   to Understand Band Values */
+   
+  // as shown b4, u can click at any pt
+  // on earth's surface & see no. of imgs
+  // recorded there in 2020 + values of
+  // any image in any band thru time
+  // can be overwhelming due to amt of data
+  
+  // in this sec & next, we will show 2 ways
+  // to summarize num values of bands
+  // to see what info is w/in img-colls
+  // 1 ez simple way, 1 harder advanced way
+  
+  // first, we make new layer representing
+  // mean value of each band per pixel
+  // per image from img-coll filtered to 2020
+  // add this layer to map, then inspect
+  
+  // in last sec, count() was called directly
+  // using shorthand, so we do same thing
+  // first, zoom to useful scale for next part
+Map.centerObject(lisbonPt, 11);
+
+  // add mean composite image to map
+  // general way is reduce(ee.Reducer.mean())
+var meanFilteredIC = filteredIC
+    .reduce(ee.Reducer.mean());
+Map.addLayer(meanFilteredIC, {},
+    'Mean Values in Image Collection', 0);
+    
+  // do same thing but for median value
+  // add to map then explore both layers
+var medianFilteredIC = filteredIC
+    .reduce(ee.Reducer.median());
+Map.addLayer(medianFilteredIC, {},
+    'Median Values in Image Collection', 0);
+  
+  // output: only slightly diff. values
+  // mean retains effect of cloud cover
+  // while median eliminates cloud cover
+  
+  // wide range of reducers available in GEE
+  // if u wanna check which are applicable
+  // to summarize band values across img-coll
+  // check Docs tab in code editor
+  
+/* Section 4: Compute Multiple Percentile 
+   Images for an Image Collection */
+   
+  // one particularly useful reducer that
+  // can help us better understand value
+  // distribution in an image collection is
+  // ee.Reducer.percentile()
+  
+  // nth percentile gives value that is
+  // nth largest in a set; think: sorting
+  // all values per band-imgcoll-pixel
+  // -> 30th percentile = value 30% of way
+  // along list, from smallest to largest
+  
+  // by computing a cumulative density fxn
+  // of values on per-pixel basis, percentile
+  // is an ez way to explore value distribution
+  
+  // example: calculate single 30th percentile
+  // on per-pixel, per-band basis on Landsat 8
+  // argument: list of specified percentiles
+var p30 = filteredIC
+    .reduce(ee.Reducer.percentile([30]));
+Map.addLayer(p30, {
+    min: 0.05,
+    max: 0.35
+}, '30th Percentile', 0);
+
+  // output: virtually no cloudy pixels
+  // cos cloudy pixels have higher reflectance
+  // while shadows have very low reflectance
+  // hence, much cleaner than mean composite
+  
+  // note: reducers operate per pixel, so
+  // adjacent pixels drawn from diff. images
+  // value of 1 pixel come from 1 date, while
+  // value of nearby pixel comes from another
+  
+  // composite images never existed on single
+  // day, but they allow noise-free analysis
+  // of earth's surface so kebs lng
+  
+  // we can explore range of values in entire
+  // img-coll by viewing series of increasingly
+  // bright percentile images using a fxn
+
+  // define client-side list of percentiles
+  // why client-side? cos items will also be
+  // used in Map.addLayer, which is client-side
+var percentiles = [0, 10, 20, 30,
+    40, 50, 60, 70, 80];
+
+  // compute percentile images then
+  // add them as separate layers
+percentiles.map(function(p) {
+    var image = filteredIC
+        .reduce(ee.Reducer.percentile([p]));
+    Map.addLayer(image, {
+        min: 0.05,
+        max: 0.35
+    }, p + 'th Percentile - Lisbon', 0);
+});
+  
+  // fxn adds each percentile image as
+  // separate layer, so explore the layers
+  
+  // output: low-percentile = darker features
+  // aka cloud shadows, hill shadows, water
+  // higher-percentile = clouds, other bright
+  // stuff, aka urban areas, etc (>60%)
+  
+  // GEE API has very rich API allowing users
+  // to explore img-colls & understand extent
+  // and variability of data in space, time
+  // and across its many bands, as well as
+  // tools to analyze values stored in img-coll
+  // in frequency domain space (a la histogram)
+  
+  // preliminary data exploration SHOULD BE
+  // FIRST STEP of any study before developing
+  // data analysis algorithms (parts F2 & F3)
+  
+/* Part 5: SYNTHESIS */
+
+  // in prev example, 30th percentile comp
+  // can be useful for studies that need
+  // cloud-free data for their analysis
+  
+  // however, "best" composite to use will
+  // depend on goals, dataset characteristics
+  // and region of interest / being viewed
+  // e.g. diff. % values for sahara vs congo
+  
+  // 1) create series of composites for
+  // specified location, for specified date
+  
+  // define ROI in metro manila
+var manilaPt = ee.Geometry.Point(
+    121.0385, 14.6051);
+Map.centerObject(manilaPt, 11);
+
+  // filter Landsat 8 collection by
+  // year=2020 and loc=manilaPt
+  // and select bands 6,5,4 again
+var manilaFiltered = ee.ImageCollection(
+'LANDSAT/LC08/C02/T1_TOA')
+    .filterBounds(manilaPt)
+    .filterDate('2020-01-01', '2021-01-01')
+    .select(['B6', 'B5', 'B4']);
+  
+  // create percentile composites for
+  // filtered img-coll over metro manila
+percentiles.map(function(p){
+    var image = manilaFiltered
+        .reduce(ee.Reducer.percentile([p]));
+    Map.addLayer(image, {
+        min: 0.05,
+        max: 0.35
+    }, p + 'th Percentile - Manila', 0);
+});
+  
+  // output: 40% & above already too cloudy
+  // 20% & below already too shadow-y
+  
+  // compare 30% composite to median
+var medianManilaFiltered = manilaFiltered
+    .reduce(ee.Reducer.median());
+Map.addLayer(medianManilaFiltered, {},
+    'Median Composite - Manila', 0);
+    
+  // median is too cloudy! damn
+  // cos median = 50th percentile
+  // and as we saw, 50% already too cloudy
+  
+  // 2) filter to create relevant data set
+  // over agricultural growing season
+  // then create percentile composites
+  
+  // set tarlac city as ROI
+var tarlacPt = ee.Geometry.Point(
+    120.5952, 15.4815);
+Map.centerObject(tarlacPt, 11);
+
+  // filter Landsat 8 by year=2015-2020,
+  // months=may-aug, location=tarlacPt
+  // then select NIR, RED, GREEN (5,4,3)
+var tarlacFiltered = ee.ImageCollection(
+'LANDSAT/LC08/C02/T1_TOA')
+    .filterBounds(tarlacPt)
+    .filterDate('2015-01-01', '2021-01-01')
+    .filter(ee.Filter.calendarRange({
+        start: 5, // may
+        end: 8,   // aug
+        field: 'month'
+    }))
+    .select(['B5', 'B4', 'B3']);
+    
+  // create percentile composites for
+  // filtered img-coll over tarlac city
+percentiles.map(function(p){
+    var image = tarlacFiltered
+        .reduce(ee.Reducer.percentile([p]));
+    Map.addLayer(image, {
+        min: 0.05,
+        max: 0.35
+    }, p + 'th Percentile - Tarlac', 0);
+});
+
+  // output: 30% still a lil too cloudy
+  // 20th percentile may be best
+  // or maybe pwede ~15th percentile if ever
+  // when it comes to crop mapping or smth
+  
+  // 3) is it possible to generalize link bet
+  // time window of img-coll & percentile value
+  // that is most useful for given project
+  
+    // smaller window -> smaller percentile
+    // cos smaller window -> more imgs have clouds
+    // BUT still need to inspect per region
+    // cos some areas cloudier than others
+    
+  // CONCLUSION: learned diff ways to explore
+  // image collections in GEE (not jus imgs)
+  
+  // learned that img-colls have global & local
+  // footprints, n showed no. of images per coll
+  
+  // learned how to explore spatiotemporal
+  // extent of imgs in coll, & how to quickly
+  // check value distrib. using reducers
+  
+  // simple reducers (mean, median, etc), or
+  // advanced ones (percentile) to better see
+  // variability of values in img collection

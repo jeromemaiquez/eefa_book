@@ -1,0 +1,794 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var bare = 
+    /* color: #d63000 */
+    /* shown: false */
+    ee.Geometry.MultiPolygon(
+        [[[[-119.42763336823695, 47.31055708348055],
+           [-119.42076696419335, 47.25745863941478],
+           [-119.36583745932694, 47.24813712343299],
+           [-119.36721070353823, 47.295657517755124]]],
+         [[[-119.17866251962553, 47.28961263806614],
+           [-119.13609049814116, 47.310101525884136],
+           [-119.13471720712553, 47.355707332246624],
+           [-119.18140910165678, 47.34081997080861]]]]),
+    veg = 
+    /* color: #98ff00 */
+    /* shown: false */
+    ee.Geometry.MultiPolygon(
+        [[[[-119.60632489748974, 47.20205433096256],
+           [-119.61184710962515, 47.184144614472956],
+           [-119.58341666722288, 47.18369788385554],
+           [-119.5812249382318, 47.19544307258297],
+           [-119.58886582315291, 47.20064483808503]]],
+         [[[-119.1216709424771, 47.01457619705178],
+           [-119.09901164071928, 47.00708505827537],
+           [-119.07085917489897, 47.01457619705178],
+           [-119.08184550302397, 47.02487479728093],
+           [-119.11480448739897, 47.024406722182995]]],
+         [[[-119.52885172860991, 46.895061092070414],
+           [-119.51099894540678, 46.88192160038702],
+           [-119.48627970712553, 46.90350620848671],
+           [-119.52061198251616, 46.90913554712797]]]]),
+    water = 
+    /* color: #0b4a8b */
+    /* shown: false */
+    ee.Geometry.MultiPolygon(
+        [[[[-119.31187174814116, 47.00942615201208],
+           [-119.33521769540678, 46.984136909491795],
+           [-119.29264567392241, 46.990694529031146]]],
+         [[[-119.50275919931303, 47.41707331576944],
+           [-119.49383280771147, 47.394301856527406],
+           [-119.49108622568022, 47.402203273905975]]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+/* Chapter F3.1: Advanced Pixel-Based
+   Image Transformation */
+
+  // using bands & indices often insufficient
+  // for obtaining high-quality classifications
+  // in this chapter: more complex pixel-based
+  // band manipulations to extract more info
+  
+  // from image manipulation using expressions
+  // to complex linear transformations
+  // that leverage matrix algebra (!!)
+  
+  // IMAGE TRANSFORMATIONS: complex calculations
+  // among image bands that use advanced math
+  // providing more info in fewer variables
+  // improving classification, time-series
+  // analysis, and change detection
+  
+  // useful for difficult RS use cases, e.g.
+  // classifying images w/ shadows/greenness
+  // or distinguishing faint signals (deforestation)
+  
+  // in this chapter: linear transformations
+  // i.e. linear combinations of input pixels
+  // pixel-based approach (local operations)
+  
+  // established methods: tasseled-cap
+  // newer methods: spectral unmixing
+  // e.g. spectral unmixing + time-series to
+  // to detect & monitor forest degradation
+  // e.g. tasseled cap + classification
+  // to map crops w/ hi scale & many classes
+  
+  // in GEE, lienar transformations applied by
+  // treating pixels as ARRAYS of band values
+  // GEE array: list of lists, used to define...
+  // MATRICES: 2-D arrays (w/ rows & columns)
+  // matrices are basis of linear transformations
+  // AXIS: rows (axis=0) & columns (axis=1)
+  
+/* Section 1: Manipulating Images
+   With Expressions */
+
+  // enhanced vegetation index (EVI): designed to
+  // minimize saturation & other issues w/ NDVI
+  // EVI = G * (NIR-R)/(NIR+(C1*R)-(C2*B)+L)
+  // constants: G, C1, C2, L (searchable online)
+  
+  // in areas of high chlorophyll (e.g. rainforests)
+  // EVI doesn't saturate as easily as NDVI
+  // allowing study of veg variation in these areas
+  
+  // using band arithmetic we learned in F2.0,
+  // calculate & display EVI for Sentinel-2 image
+  // need to extract bands & divide by 10,000
+  // to account for scaling in dataset
+  
+  // import & filter imagery by location & date
+var sfoPoint = ee.Geometry.Point(-122.3774, 37.6194);
+var sfoImage = ee.ImageCollection('COPERNICUS/S2')
+    .filterBounds(sfoPoint)
+    .filterDate('2020-02-01', '2020-04-01')
+    .first();
+Map.centerObject(sfoImage, 11);
+
+  // calculate EVI using Sentinel 2
+  
+  // extract bands & divide by 10,000
+  // to account for scaling (check dataset)
+var nirScaled = sfoImage.select('B8').divide(10000);
+var redScaled = sfoImage.select('B4').divide(10000);
+var blueScaled = sfoImage.select('B2').divide(10000);
+
+  // calculate numerator (G*(NIR-R)) (G=2.5)
+var numeratorEVI = (nirScaled
+    .subtract(redScaled))
+    .multiply(2.5);
+  
+  // calculate denominator
+  // (NIR+C1*R-C2*B+L) (C1=6, C2=7.5, L=1)
+var denomClause1 = redScaled.multiply(6);
+var denomClause2 = blueScaled.multiply(7.5);
+var denominatorEVI = nirScaled
+    .add(denomClause1) // C1*R
+    .subtract(denomClause2) // C2*B
+    .add(1);  // L
+    
+  // finish calculation of EVI & name it
+var EVI = numeratorEVI
+    .divide(denominatorEVI)
+    .rename('EVI');
+  
+  // add EVI to map using veg palette
+var vegPalette = ['red', 'white', 'green'];
+var vizParams = {min: -1, 
+                 max: 1, 
+                 palette: vegPalette};
+// Map.addLayer(EVI, vizParams, 'EVI', 0);
+
+  // expected output: similar to NDVI
+  // the EVI code works, but is unwieldy...
+  // needed many variables & used many functions
+  
+  // instead, can make a function to make steps
+  // more robust & easily repeatable
+  // using expression() method
+var expressionEVI = sfoImage.expression({
+    expression: '2.5 * ((NIR - RED) / (NIR + 6 * RED - 7.5 * BLUE + 1))',
+    map: { // link variables in expression to images
+          'NIR': sfoImage.select('B8').divide(10000),
+          'RED': sfoImage.select('B4').divide(10000),
+          'BLUE': sfoImage.select('B2').divide(10000)
+    }
+});
+
+  // and now map EVI using vegetation palette
+// Map.addLayer(expressionEVI, vizParams, 
+//     'EVI Expression', 0);
+    
+  // expression defined first as a string
+  // using human-readable names (e.g. 'NIR')
+  // then define names by selecting bands
+  
+  // now let's use an expression to calculate
+  // another index: BAI (burned area index)
+  // by Martin (1998) for burn scar delineation
+  // and burn severity assessment
+  
+  // BAI relies on ash & charcoal residue of fires
+  // fires w/o ash/charcoal or old fires
+  // where those washed away not well-detectable
+  
+  // BAI computes spectral distance of each pixel
+  // to spectral reference pt for burned areas
+  // spectrally closer to refpt = larger BAI value
+  
+  // BAI = 1/((pcr-R)^2 + (pcn-NIR)^2)
+  // constants: pcr = 0.1, pcn = 0.06
+  
+  // example: examine Rim Fire in Sierra Nevada
+  // using Landsat 8 and BAI
+  
+  // import & display true-color Landsat image
+  // of 2013 Rim Fire, sorted by cloud cover
+var rimFirePt = ee.Geometry.Point(-120.083, 37.850)
+var burnImage = ee.ImageCollection('LANDSAT/LC08/C02/T1_TOA')
+    .filterBounds(rimFirePt)
+    .filterDate('2013-09-15', '2013-09-27')
+    .sort('CLOUD_COVER')
+    .first();
+
+Map.centerObject(rimFirePt, 11);
+
+var rgbParams = {
+    bands: ['B4', 'B3', 'B2'],
+    min: 0,
+    max: 0.3
+};
+// Map.addLayer(burnImage, rgbParams, 
+//     'True-Color Burn Image', 0);
+  
+  // expected output: true-color imagery
+  // but burn area is not obvious
+ 
+  // hence need to calculate BAI
+  // again using expression() method
+  // recap: 1/((pcr-RED)^2 + (pcn-NIR)^2)
+var bai = burnImage.expression(
+    '1.0 / ((0.1 - RED)**2 + (0.06 - NIR)**2)', {
+        'NIR': burnImage.select('B5'),
+        'RED': burnImage.select('B4')
+    });
+
+  // display result w/ burn palette
+var burnPalette = ['green', 'blue',
+                   'yellow', 'red'];
+Map.addLayer(bai, {
+    min: 0,
+    max: 400,
+    palette: burnPalette
+}, 'BAI', 0);
+
+  // expected output: yellow & red: burn
+  // greater contrast vs. green & blue
+  
+/* Section 2: Manipulating Images
+   With Matrix Algebra */
+
+/* Section 2A: Tasseled Cap Transform */
+
+  // feature space: graph of reflectance in 2 bands
+  // e.g. red in x axis, nir in y axis
+  
+  // TASSELED CAP (TC) transformation:
+  // look like wooly hat w/ tassel in graph
+  // base of hat: soil reflectance (soil line)
+  // tip of hat: mature vegetation (nir-est)
+  // diagonals of hat: young or yellow veg.
+  
+  // often used to better distinguish
+  // different growing stages (e.g. wheat)
+  
+  // based on studies of agri land cover
+  // in NIR-R spectral space, Kauth & Thomas
+  // devised rotation transform w/ equation:
+  
+  // p1 = RT*p0 (p0 = orig. px1 pixel vector)
+  // aka stack of p band values for given pixel
+  // R = matrix; orthonromal basis of new space
+  // where each column is orthogonal to each other
+  // RT = transpose of R (see matrix algebra)
+  // p1 = rotated stack of values for pixel
+  
+  // axis 1: Landsat pixel values of soil
+  // axis 2: pixel values of vegetation
+  // axis 3: pixel values of yellow veg.
+  // axis 4: pixel values of noise
+  // each axis orthogonal to each other (4D)
+  
+  // R matrix been derived for each Landsat
+  // this transform can be done in GEE w/ arrays
+  // example: array for TC coefficients for Landsat 5
+
+  // construct array (list of lists)
+  // of TC coefficients, which correspond
+  // to linear combos of values of 
+  // 6 non-thermal Landsat bands (1-5 & 7)
+var landsat5RT = ee.Array([
+    [0.3037, 0.2793, 0.4743, 0.5585, 0.5082, 0.1863],
+    [-0.2848, -0.2435, -0.5436, 0.7243, 0.0840, -0.1800],
+    [0.1509, 0.1973, 0.3279, 0.3406, -0.7112, -0.4572],
+    [-0.8242, 0.0849, 0.4392, -0.0580, 0.2012, -0.2768],
+    [-0.3280, 0.0549, 0.1075, 0.1855, -0.4357, 0.8085],
+    [0.1084, -0.9022, 0.4120, 0.0573, -0.0251, 0.0238]
+]);
+
+print('RT for Landsat 5', landsat5RT);
+  
+  // expected output: list of lists
+  // ig ipplug-in to sa equation kanina?
+
+  // next, search odessa, WA in search bar
+  // define point in it to center map
+var odessa = ee.Geometry.Point(
+    [-119.2958, 47.1441]);
+Map.centerObject(odessa, 10);
+
+  // filter Landsat 5 by location & date
+  // and sort by cloud cover to limit clouds
+var imageL5 = ee.ImageCollection('LANDSAT/LT05/C02/T1_TOA')
+    .filterBounds(odessa)
+    .filterDate('2008-06-01', '2008-09-01')
+    .sort('CLOUD_COVER')
+    .first();
+
+  // display true-color image
+var trueColor = {
+    bands: ['B3', 'B2', 'B1'],
+    min: 0,
+    max: 0.3
+};
+Map.addLayer(imageL5, trueColor,
+    'L5 True-Color', 0);
+
+  // next, perform matrix multiplication
+  
+  // first, convert input image from
+  // multi-band image to array image
+  // multi-band: 1 value per pixel, per band
+  // array image: array of band values per pixel
+  // using toArray() function
+var bands = ['B1', 'B2', 'B3',
+    'B4', 'B5', 'B7'];
+
+  // make array image, w/ 1D array per pixel
+  // note: 1D array also known as vector
+  // 1D array = list of values of length=6
+  // values from each band in list 'bands'
+var arrayImage1D = imageL5
+    .select(bands)
+    .toArray();
+print('1D Array Image', arrayImage1D);
+// Map.addLayer(arrayImage1D, {}, 
+//     '1D Array Image');
+
+  // resulting data structure:
+  // [B1, B2, B3, B4, B5, B7]
+
+  // make array image w/ 2D array per pixel
+  // of dimensions 6x1, aka a 1-column matrix
+  // w/ 6 rows, values from each band in 'bands'
+  // this is needed for matrix multiplication (p0)
+var arrayImage2D = arrayImage1D
+    .toArray(1);
+print('2D Array Image', arrayImage2D);
+// Map.addLayer(arrayImage2D, {}, 
+//    '2D Array Image');
+
+  // toArray(axis): 0=row, 1=column
+  // result = 6 rows x 1 column array for p0
+  // max value = no. of dimensions of array
+
+  // resulting    [[B1]
+  // data          [B2]
+  // structure     [B3]...]
+
+  // now we complete matrix multiplication
+  // for tasseled cap linear transformation
+  // using matrixMultiply() function
+  // then convert result back into multi-band
+  // using arrayProject() and arrayFlatten()
+  
+  // multiply RT by p0
+var tasselCapImage = ee.Image(landsat5RT)
+      // multiply TC coefficients to array
+      // made from 6 bands per pixel
+      // aka multiply RT by p0
+    .matrixMultiply(arrayImage2D)
+      // remove extra dimensions
+    .arrayProject([0])
+      // get multi-band image
+      // w/ TC-named bands (e.g. brightness)
+    .arrayFlatten([[
+        'brightness', 'greenness',
+        'wetness', 'fourth', 
+        'fifth', 'sixth']
+]);
+
+  // display the results
+var vizParams = {
+    // redder = brighter IRL
+    // greener = greener IRL
+    // bluer = wetter IRL
+    // white = bright, green, wet
+    bands: ['brightness', 
+            'greenness',
+            'wetness'],
+    min: -0.1,
+    // diff. max value per band
+    max: [0.5, 0.1, 0.1]
+};
+Map.addLayer(tasselCapImage, vizParams,
+    'TC Components', 0);
+
+  // expected output: water = blue
+  // healthy irrigated crops = bright circles
+  // dry crops = red (e.g. grass, non-irrigated)
+  // odessa: dry area w/ irrigated crops
+  // so TC image is very striking
+  
+  // bonus: try array image operation
+  // one step at a time
+
+  // step 1: multiply RT matrix to p0
+  // expected output: 6 rows x 1 column
+var matrixMultImage = ee.Image(landsat5RT)
+    .matrixMultiply(arrayImage2D);
+// Map.addLayer(matrixMultImage, {},
+//     'RT * p0 Image', 0);
+
+  // step 2: remove extra dimensions
+  // expected output: 1D array of values
+  // aka single row or list
+var arrayProjImage = matrixMultImage
+    .arrayProject([0]);
+// Map.addLayer(arrayProjImage, {},
+//     'Array Project Image', 0);
+
+  // step 3: convert array values to bands
+  // expected output: band names & values
+var arrayFlatImage = arrayProjImage
+    .arrayFlatten([[
+        'brightness', 'greenness',
+        'wetness', 'fourth', 
+        'fifth', 'sixth']
+]);
+// Map.addLayer(arrayFlatImage, vizParams,
+//     'Array Flattened Image', 0);
+
+  // NOTES FOR TASSELED CAP:
+  // 1) only done on imagery from Landsat,
+  // and a select few other sensors
+  // 2) diff. no. of output bands per
+  // type of Landsat imagery used
+  // 3) best done on calibrated reflectance
+  // instead of raw DN imagery
+
+/* Section 2B: Principal Component 
+   Analysis (PCA) */
+   
+  // an orthogonal rotational transformation
+  // transforms data into new CRS where
+  // all axes are orthogonal (perpendicular)
+  
+  // axis 1: coordinate (captures most variance)
+  // axis 2 captures 2nd-most variance, etc.
+  
+  // axes are uncorrelated cos orthogonal nga
+  // thus PCA used as a dimension reduction tool
+  // cos most variation in dataset w/ n axes
+  // can be captured in n-x axes
+  // for more on PCA, just google LOL
+  
+  // to demo practical use of PCA,
+  // import Landsat 8 image & convert to array
+
+  // import & map true-color L8 image
+var imageL8 = ee.ImageCollection(
+'LANDSAT/LC08/C02/T1_TOA')
+  .filterBounds(odessa)
+  .filterDate('2018-06-01', '2018-09-01')
+  .sort('CLOUD_COVER')
+  .first();
+var trueColorL8 = {
+    bands: ['B4', 'B3', 'B2'],
+    min: 0,
+    max: 0.3
+};
+Map.addLayer(imageL8, trueColorL8, 
+    'L8 True Color', 0);
+
+  // select which bands to use for PCA
+var PCAbands = ['B2', 'B3', 'B4',
+    'B5', 'B6', 'B7', 'B10', 'B11'];
+
+  // convert landsat 8 image to 1D array
+  // later na pagconvert to 2D
+  // embedded w/in d matrixMultiply
+var arrayImage = imageL8
+    .select(PCAbands)
+    .toArray();
+
+  // next, use reduceRegion() w/
+  // ee.Reducer.covariance function
+  // to compute covariance of image
+var covar = arrayImage.reduceRegion({
+    reducer: ee.Reducer.covariance(),
+    maxPixels: 1e9
+});
+
+  // result of reduction: an object
+  // w/ 1 property 'array' which
+  // stores the covariance matrix
+  
+  // extract covar matrix & store as array
+var covarArray = ee.Array(covar
+    .get('array'));
+// print('Covariance Matrix', covarArray);
+
+  // now, we can perform eigen analysis
+  // on covar matrix to compute eigenvectors
+  // needed to perform the PCA
+var eigens = covarArray.eigen();
+// print('Eigen Matrix', eigens);
+
+  // output: both eigenvectors & eigenvalues
+  // since we only need eigenvectors for PCA
+  // we use slice() to extract them
+  // from 0th position of 1 axis
+var eigenVectors = eigens.slice(1,1);
+print('Eigen Vectors', eigenVectors);
+
+  // eigenvectors: 1D array showing contribution
+  // of each input band to each PC band
+  // total contrib. of all bands: sum of squares
+  // of PC band's eigenvector elements
+  
+  // eigenvalues: indicate % of original info
+  // that each PC band retains
+  // % retained = eigenvalue / total eigenvalue
+
+  // now, we perform matrix multiplication
+  // using eigenVectors & arrayImage earlier
+  // same process as tasseled cap
+var principalComponents = ee.Image(eigenVectors)
+    .matrixMultiply(arrayImage.toArray(1));
+    
+  // then convert back to multi-band image
+  // and display first principal component (pc1)
+var pcImage = principalComponents
+    // remove extra dimension, [[]] -> []
+    .arrayProject([0])
+    // turn single-band array image
+    // into multi-band image, [] -> image
+    .arrayFlatten([
+        ['pc1', 'pc2', 'pc3', 'pc4',
+         'pc5', 'pc6', 'pc7', 'pc8']
+]);
+
+  // stretch map layer to appropriate scale
+  // using layer manager
+Map.addLayer(pcImage.select('pc1'), {},
+    '1st Principal Component', 0);
+  
+  // pc1 output: grayscale satellite image
+  // larger stretch, more contrast
+  // what is captured in pc1?
+  // biggest chunk of variation bet. bands
+  
+  // pc2 output: edges are brightened
+  // stripe effect diagonally
+  
+  // try displaying pc1, pc3, and pc4
+  // in three-band RGB display
+  // diff. min & max values per band
+  // cos of very diff. value ranges per band
+var vizParamsPCA = {
+    bands: ['pc1', 'pc3', 'pc4'],
+    min: [-455.09, -2.206, -4.53],
+    max: [-417.59, -1.3, -4.18]
+};
+Map.addLayer(pcImage, vizParamsPCA, 
+    'PC Multiband', 0);
+  
+  // min & max values depends by pc & area
+  // no defined output axes like TC transform
+  
+  // instead, each pc/axis dynamically captures
+  // some aspect of variation w/in dataset
+  // thus, mapped PCA may differ a lot based
+  // on where PCA is done & which bands used
+  
+/* Section 3: Spectral Unmixing */
+
+  // each pixel in medium-scale dataset
+  // likely represents multiple IRL objects
+  // thus, spectral sig. of that pixel is
+  // a mix of 'pure' spectra per IRL object
+  
+  // e.g. Landsat forest pixel (30mx30m)
+  // spectral sig is mix of trees, understory,
+  // tree shadows, and visible soil patches
+  
+  // eto assumption ng linear spectral unmixing
+  // pure spectra (aka endmembers) are from
+  // land cover classes (e.g. water, bare land)
+  
+  // goal is to solve for f: p = Sf
+  // (f= Px1 vector of endmember fractions per pixel)
+  // S = BxP matrix, p = Bx1 vector  
+  // (B=no. of bands, P=no. of endmembers)
+  // p is known, S is definable
+  
+  // example, unmixing of Landsat 8 image
+  
+  // specify which bands to use in unmixing
+  // number of bands (B) = 6
+var unmixImage = imageL8
+    .select(['B2', 'B3', 'B4',
+             'B5', 'B6', 'B7']);
+
+  // step 1: define endmembers to define S
+  // via computing mean spectra in polygons
+  // delineated in regions of pure land cover
+  // use false-color composite to aid
+Map.addLayer(imageL8, {
+    bands: ['B5', 'B4', 'B3'],
+    min: 0.0,
+    max: 0.4
+}, 'False Color', 0);
+
+  // make 3 new layers of polygons (P=3)
+  // endmembers: bare land, veg, water
+  
+  // check created features by
+  // charting mean spectra in them
+  // using ui.Chart.image.regions
+  
+  // create collection of feature collections
+var lcFeatures = ee.FeatureCollection([
+    ee.Feature(bare, {label: 'bare'}), 
+    ee.Feature(water, {label: 'water'}),
+    ee.Feature(veg, {label: 'veg'})
+]);
+print(ui.Chart.image.regions({
+    image: unmixImage,
+    regions: lcFeatures,
+    reducer: ee.Reducer.mean(),
+    scale: 30,
+    seriesProperty: 'label',
+    // spectral midpoint of each band
+    xLabels: [0.48, 0.56, 0.65,
+              0.86, 1.61, 2.2]
+})
+    .setChartType('LineChart')
+    .setOptions({
+        title: 'Image Band Values per Endmember',
+        hAxis: {title: 'Wavelength'},
+        vAxis: {title: 'Mean Reflectance'}
+}));
+
+  // use reduceRegion() to compute mean values
+  // w/in polygons for each of the bands
+  // output: dictionary of numbers summarizing
+  // values in polygons, indexed by band name
+  
+  // extract means as a list using values()
+  // orders results alphanumerically by keys
+  // can also specify list of band names if needed
+var bareMean = unmixImage
+    .reduceRegion(
+        ee.Reducer.mean(), bare, 30)
+    .values();
+var waterMean = unmixImage
+    .reduceRegion(
+        ee.Reducer.mean(), water, 30)
+    .values();
+var vegMean = unmixImage
+    .reduceRegion(
+        ee.Reducer.mean(), veg, 30)
+    .values();
+
+  // each of these lists represents
+  // a vector of mean spectrum values
+  // which is 1 of column of S matrix
+  
+  // stack vectors into 6x3 array of endmembers
+  // by concatenating them along 1-axis (columns)
+  // from horizontal to vertical
+var endmembers = ee.Array.cat(
+    [bareMean, vegMean, waterMean], 1);
+print('Endmember Matrix', endmembers);
+
+  // expected output: 6 rows x 3 columns
+  // rows=bands, columns=endmembers
+  
+  // now, convert 6-band input image
+  // into 1D array image, then to 6x1 array image
+  // creating p, to then solve p = Sf
+var arrayImage = unmixImage
+    .toArray()
+    .toArray(1);
+
+  // now solve for f using matrixSolve()
+  // which solves for x in Ax = B
+  // here, A=S and B=p
+var unmixed = ee.Image(endmembers)
+    .matrixSolve(arrayImage);
+
+  // finally, convert result from 6x1 array image
+  // to 1D array image, then to multi-band image
+  // using arrayProject() and arrayFlatten()
+  // bands: bare, veg, and water fraction per pixel
+var unmixedImage = unmixed
+    .arrayProject([0])
+    .arrayFlatten([
+        ['bare', 'veg', 'water']
+]);
+
+  // now display results
+  // already arranged in RGB
+  // and as fraction, range = [0,1]
+Map.addLayer(unmixedImage, {},
+    'Spectrally Unmixed Image', 0);
+    
+  // expected output: bare = red,
+  // green = veg, blue = water
+  // if di primary, endmembers r mixed
+    
+/* Section 4: The Hue, Saturation, 
+   Value Transform */
+
+  // while 3 previous methods transform image
+  // based on spectral sigs of orig. image,
+  // HSV transform is a color transform
+  // w/in d RGB color space (optical?)
+  
+  // HSV transform used for pan-sharpening
+  // by which higher-res panchromatic image
+  // is combined w/ lower-res multiband raster
+  
+  // involves converting RGB into HSV color space,
+  // swapping pan & value bands, then back to RGB
+  // since value = brightness in orig image
+  // output: higher-res brightness in image
+  
+  // example: pan-sharpening Landsat 8 image
+  // Landsat: pan=15m pixels, RGB bands=30m
+  
+  // convert Landsat RGB to HSV color space
+  // using rgbToHsv() function
+var hsv = imageL8
+    .select(['B4', 'B3', 'B2'])
+    .rgbToHsv();
+Map.addLayer(hsv, {
+    max:  0.4
+}, 'HSV Transform', 0);
+
+  // then swap pan band for value band
+  // which is third in HSV image
+  // by concatenating diff. image bands
+  // using ee.Image.cat([]) then hsvToRgb()
+var rgb = ee.Image.cat([
+    hsv.select('hue'),
+    hsv.select('saturation'),
+    imageL8.select(['B8'])
+]).hsvToRgb();
+Map.addLayer(rgb, {
+    max: 0.4
+}, 'Pan-Sharpened', 0);
+
+  // expected output: sharper image
+  // but only applicable for RGB bands
+  // so siguro for basemaps? or like
+  // visual interpretation of imagery
+
+/* Section 5: SYNTHESIS */
+
+  // 1) write expression for NBRT index
+  // for Rim Fire Landsat 8 image (burnImage)
+  // NBRT: normalized burn ratio thermal
+  
+  // NBRT based on idea that burned land
+  // has low NIR, high SWIR reflectance
+  // and high brightness temperature
+  
+  // NBRT = (NIR-SWIR*(T/10k))/(NIR+SWIR*(T/10k))
+  // NIR = B5, SWIR2 = B7, TIR = B10/11
+
+Map.centerObject(rimFirePt, 11);
+
+var nbrt = burnImage.expression(
+    '(NIR - SWIR * (TIR / 10000 )) / (NIR + SWIR * (TIR / 10000))', {
+    'NIR': burnImage.select('B5'),
+    'SWIR': burnImage.select('B7'),
+    'TIR': burnImage.select('B11')
+});
+
+  // lower NBRT = more burning
+  // so we can reverse color palette
+  // by swapping min & max values
+Map.addLayer(nbrt, {
+    min: 1,
+    max: 0.9,
+    palette: burnPalette
+}, 'NBRT Index');
+
+  // expected output: slightly different
+  // distribution of burned areas
+  // and more blue than green overall
+  // similar results whether TIR=B10 or B11
+  
+  // conclusion: linear image transformations
+  // are powerful tools in RS analysis
+  // can be used to highlight specific aspects
+  // of data to facilitate interpretation
+  
+  // e.g. spectral unmixing often used in
+  // change detection (e.g. forest degradation)
+  // using endmembers as inputs to algorithms
+  // improves model detection of subtle changes
+  // due to removal of some but not all trees in pixel

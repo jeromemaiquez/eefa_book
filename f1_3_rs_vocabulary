@@ -1,0 +1,537 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var mod09 = ee.ImageCollection("MODIS/061/MOD09A1"),
+    tm = ee.ImageCollection("LANDSAT/LT05/C02/T1"),
+    msi = ee.ImageCollection("COPERNICUS/S2"),
+    naip = ee.ImageCollection("USDA/NAIP/DOQQ"),
+    eo1 = ee.ImageCollection("EO1/HYPERION");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+/* Chapter F1.3: The Remote Sensing Vocabulary*/
+
+  // images & collections form basis of RS analysis in GEE
+  // but not every dataset is appropriate for every analysis
+  // factors in choosing appropriate dataset:
+  // 1) spatial resolution, 2) temporal resolution
+  // 3) spectral resolution, 3) data quality & etc.
+  
+  // resolution can affect detail & accuracy of results
+  // as well as duration of processing needed
+  // e.g. spatial resolution = areal extent of 1 pixel
+  
+/* Section 1: Searching & Viewing Image Collection Info */
+
+  // GEE search bar can be used to find imagery
+  // and locate important info abt GEE datasets
+  // once a dataset is selected, may inset window
+  
+  // info in this window: 1) description, 2) bands
+  // 3) image properties, 4) terms of use 5) dates
+  // 6) citation (sometimes)
+  
+  // also includes link to data source provider
+  // snippet of image collection to be pasted to code
+  // and 'see example' to see how dataset is used
+  
+  // can also browse deeper in EE Data Catalog
+  // or by pressing enter in search bar & looking there
+  
+/* Section 2: Spatial Resolution */
+
+  // recap - spatial resolution: area of 1 pixel
+  // referred to length of side of square pixel
+  // e.g. Landsat 7 30m imagery = 900 m2 per pixel
+  // spatial resolution also called the scale
+  
+  // visualize data from multiple sensors which are
+  // at diff. spatial resolutions to compare effect
+  // of scale on detail & appearance of data
+  
+  // select single image from each collection
+  // and visualize as color-IR image (NIR, R, G)
+  // zoom in & out to compare pixel size & image size
+  
+  // 1) MODIS: 500m pixels for NIR-R-G = 0.25 km2
+  
+  // define ROI as point at san francisco airport
+var sfoPoint = ee.Geometry.Point(-122.3774, 37.6194);
+
+  // center the map at that point
+Map.centerObject(sfoPoint, 15);
+
+  // get image from imported MODIS MYD09GA collection
+var modisImage = mod09
+    .filterDate('2022-02-01', '2022-03-01')
+    .first();
+    
+  // use these MODIS bands for NIR-R-G respectively
+var modisBands = [
+    'sur_refl_b02',
+    'sur_refl_b01',
+    'sur_refl_b04'];
+    
+  // define visualization parameters for MODIS
+var modisVis = {
+    bands: modisBands,
+    min: 0,
+    max: 3000
+};
+
+  // add MODIS image to map
+Map.addLayer(
+    modisImage,
+    modisVis,
+    'MODIS', 0);
+  
+  // expected output: big red parallelograms
+  // why not square? cos shape & angle of pixels
+  // are controlled by projection of dataset
+  // and projection of our current viewing
+ 
+  // no need to worry abt projections in GEE
+  // cos it automatically adjusts (usually)
+  // can consult documentation for more info
+  
+  // compare pixel size to object size on ground
+  // turn on satellite basemap and lower opacity
+
+  // get scale of data from NIR band's projection
+  // access projection info using projection()
+  // then using nominalScale() to extract scale
+var modisScale = modisImage
+    .select('sur_refl_b02')
+    .projection()
+    .nominalScale();
+    
+  // print pixel size (in m) given by nominalScale
+print('MODIS NIR scale: ', modisScale);
+
+  // expected output: just under 500m scale
+  // due to sinusoidal projection of MODIS data
+  // and distance of pixel from nadir, aka
+  // where satellite is pointing directly down
+  
+  // 2) TM sensor on Landsat 4/5: 30m pixels 
+  // = 900 m2; active from 1982 to 2012
+  
+  // visualize TM data over SFO & compare w/ MODIS
+  // in TM: NIR = B4, R = B3, G = B2
+
+  // filter TM imagery by location & date
+var tmImage = tm
+    .filterBounds(Map.getCenter())
+    .filterDate('1987-03-01', '1987-08-01')
+    .first();
+
+  // display TM image as false-color composite
+  // could also define viz parameters sa separate variable
+Map.addLayer(tmImage, {
+    bands: ['B4', 'B3', 'B2'],
+    min: 0,
+    max: 100
+  }, 'TM', 0);
+  
+  // expected output: smaller pixels, actual detail
+  // can distinguish pavement vs. grass
+  
+  // get scale of TM data from projection info
+  // select band cos projection() returns an error
+  // if bands of an image have diff. projections
+var tmScale = tmImage
+    .select('B4')
+    .projection()
+    .nominalScale();
+    
+print('TM NIR scale: ', tmScale);
+
+  // 3) MSI sensor on Sentinel-2: 10m pixels
+  // = 100m2 for NIR-VIS; 20-30m for other bands
+  // Sentinel-2A launched in 2015, 2B in 2017
+  
+  // compare MSI data to TM & MODIS
+  // in MSI: NIR = B8, R = B4, G = B3
+  
+  // filter MSI imagery by location & date
+var msiImage = msi
+    .filterBounds(Map.getCenter())
+    .filterDate('2020-02-01', '2020-04-01')
+    .first();
+  
+  // display MSI image as false-color composite
+Map.addLayer(msiImage, {
+    bands: ['B8', 'B4', 'B3'],
+    min: 0,
+    max: 2000
+}, 'MSI', 0);
+
+  // get scale of MSI data from projection & print
+var msiScale = msiImage.select('B8')
+    .projection()
+    .nominalScale();
+print('MSI scale: ', msiScale);
+
+  // expected output: even MORE detail, smaller pixels
+  // can distinguish diff. pavement reflectances
+  
+  // image extent: MODIS >>> TM > MSI
+  // MODIS: global, TM: SF-SAC, MSI: bay area
+  // proving tradeoff between scale & extent
+  
+  // 4) NAIP: airborne sensors, 0.5-2m pixel size
+  // depending on state & date of collection
+  // ^ US govt. program for agriculture imagery
+  
+  // compare NAIP to MODIS, TM, MSI
+  // NIR: N, R: R, G: G (duh)
+  
+  // get NAIP images for study period & ROI
+var naipImage = naip
+    .filterBounds(Map.getCenter())
+    .filterDate('2018-01-01', '2018-12-31')
+    .first();
+    
+  // display NAIP mosaic as color-IR composite
+Map.addLayer(naipImage, {
+    bands: ['N', 'R', 'G']
+}, 'NAIP', 0);
+
+  // expected output: very hi-res pic of sfo
+  // can see individual airplanes & runway markings
+  // but extent doesn't even cover whole SF
+  
+  // get NAIP scale from first image in mosaic
+var naipScale = naipImage
+    .select('N')
+    .projection()
+    .nominalScale();
+print('NAIP NIR scale: ', naipScale);
+
+  // MODIS: large pixels (coarse resolution)
+  // TM & MSI: medium pixels (medium resolution)
+  // NAIP: small pixels (fine resolution)
+  
+/* Section 3: Temporal Resolution */
+
+  // temporal resolution: revisit time of satellite
+  // to same area (aka temporal cadence)
+  // think: freq of pixels in time series in 1 loc
+  
+  // 1) Landsat 5 onwards: 16-day revisit time
+  
+  // to see time series of images at 1 location,
+  // filter image coll. to area & date range then print
+  
+  // e.g. check TM images for 3 months in 1987 in SFO
+  
+  // print to see Landsat revisit time
+print('Landsat-5 series: ', tm
+  .filterBounds(Map.getCenter())
+  .filterDate('1987-06-01', '1987-09-01'));
+  
+  // expected output: names of Landsat 5 images
+  // which includes in them the dates of collection
+  
+  // not easy to see revisit time there via text
+  // so create chart to see landsat 5's 16 day revisit time
+  // collection can be filtered w/in or specified before
+var tmChart = ui.Chart.image.series({
+    imageCollection: tm
+      .select('B4')
+      .filterDate('1987-06-01', '1987-09-01'),
+    region: sfoPoint
+}).setSeriesNames(['NIR']);
+
+  // define chart style to better show dates of collection
+  // w/o this, chart is just a line w/o dates of coll.
+var chartStyle = {
+  hAxis: {title: 'Date'},
+  vAxis: {title: 'NIR Mean'},
+  series: {
+           0: {
+              lineWidth: 3,
+              pointSize: 6
+              }
+          }
+};
+
+  // apply custom style properties to chart
+tmChart.setOptions(chartStyle);
+
+  // print the chart
+  // once before style is applied, once after
+// print('TM Chart', tmChart);
+
+  // expected output: point per date of collection
+  // w/ proper labels for each axis
+  // x-axis: image (by date), y-axis: reflectance
+  
+  // can mouse over chart to see date & NIR value
+  // can also expand chart via button sa upper right
+  // more chart examples in chapter F4
+  
+  // 2) Sentinel-2: 5-day revisit period
+  // from 2A & 2B satellites w/ coordinated orbits
+  // images from both are pooled in same dataset
+  
+  // create chart to see sentinel-2's 5-day revisit time
+var msiChart = ui.Chart.image.series({
+    imageCollection: msi
+      .select('B8')
+      .filterDate('2020-06-01', '2020-09-01'),
+    region: sfoPoint
+}).setSeriesNames(['NIR']);
+
+  // apply previously defined custom style to chart
+msiChart.setOptions(chartStyle);
+
+  // print the MSI revisit time chart
+// print('MSI Chart', msiChart);
+
+  // expected output: more pts vs. TM chart
+  // --> greater temporal resolution
+  // x-axis: image (by date), y-axis: reflectance
+  
+/* Section 4: Spectral Resolution */
+
+  // spectral resolution: no. & width of spectral bands
+  // in which the sensor takes measurements
+  // multispectral sensor: 3-10 bands
+  // hyperspectral sensor: 100+ (it's all relative)
+  
+  // compare multispectral MODIS instrument
+  // vs. hyperspectral Hyperion on EO-1 satellite
+  
+  // easy way to check no. of bands: 
+  // print list of bandnames & length of list
+var modisBands = modisImage.bandNames();
+print('MODIS bands: ', modisBands);
+print('MODIS number of bands: ', modisBands.length());
+
+  // expected output: band names & number
+  // BUT not all bands are spectral bands
+  // check bands on dataset info page in GEE
+  
+  // graphing MODIS spectral bands (bands 1-7)
+  
+  // select only reflectance bands of interest
+var reflectanceImage = modisImage.select(
+    'sur_refl_b01',
+    'sur_refl_b02',
+    'sur_refl_b03',
+    'sur_refl_b04',
+    'sur_refl_b05',
+    'sur_refl_b06',
+    'sur_refl_b07');
+
+  // define custom chart style for MODIS bands
+var options = {
+    title: 'MODIS spectrum at SFO',
+    hAxis: {title: 'Band'},
+    vAxis: {title: 'Reflectance'},
+    legend: {position: 'none'},
+    pointSize: 3
+};
+
+  // create the chart using the
+  // ui.Chart.image.regions
+  // and apply custom style via setOptions
+var modisReflectanceChart = ui.Chart.image.regions({
+    image: reflectanceImage,
+    regions: sfoPoint
+}).setOptions(options);
+
+  // display the chart
+// print(modisReflectanceChart);
+
+  // expected output: chart w/ bands on x-axis
+  // clearly labelled, and reflectance on y-axis
+  
+  // now we compare MODIS to EO-1's sensor
+  // search for eo-1 and import as 'eo1'
+  
+  // filter eo1 collection by date & pick 1st image
+var eo1Image = eo1
+    .filterDate('2015-01-01', '2016-01-01')
+    .first();
+    
+  // get EO-1 band names as an ee.List
+  // via the bandNames() method then print
+var eo1Bands = eo1Image.bandNames();
+print('EO-1 bands: ', eo1Bands);
+
+  // expected output: 198 bands (all spectral)
+  // vs. MODIS' 7 spectral bands
+  
+  // create reflectance chart as we did w/ MODIS
+  
+  // create custom style for chart
+var optionsEO1 = {
+    title: 'EO1 spectrum',
+    hAxis: {title: 'Band'},
+    vAxis: {title: 'Reflectance'},
+    legend: {position: 'none'},
+    pointSize: 3
+};
+
+  // make the chart and set the custom style
+  // then print the chart (!)
+  // bakit iba point? baka dun lng meron coverage...
+var eo1Chart = ui.Chart.image.regions({
+    image: eo1Image,
+    regions: ee.Geometry.Point([6.10, 81.12])
+}).setOptions(optionsEO1);
+// print(eo1Chart);
+
+  // expected output: many more bands than MODIS
+  // more points included, more detailed line
+  // expand chart (upper right) to see band names
+  
+  // if printing multiple charts of same type
+  // maybe better to create 1 style for all
+  // and specify chart title in the print() function
+  
+/* Section 5: Per-Pixel Quality */
+
+  // not all bands in imagery are spectral
+  // some have impt metadata (e.g. per-pixel quality)
+  
+  // e.g. Sentinel-2: QA60 band, which contains
+  // surface reflectance quality assurance info
+  // we can add it to the map to inspect its values
+  
+  // filter msi collection by bounds, date, first
+  // to be used for per-pixel quality visualization
+var msiCloud = msi
+    .filterBounds(Map.getCenter())
+    .filterDate('2019-12-31', '2020-02-01')
+    .first();
+
+  // display MSI image as a false-color composite
+Map.addLayer(msiCloud,{
+    bands: ['B8', 'B4', 'B3'],
+    min: 0,
+    max: 2000
+}, 'MSI Color-IR Composite', 0);
+
+  // display per-pixel quality
+Map.addLayer(msiCloud,{
+    bands: ['QA60'],
+    min: 0,
+    max: 2000
+}, 'Sentinel Quality Visualization', 0);
+
+  // expected output: black = 0 = no clouds
+  // gray = 1024 = opaque clouds
+  // white = 2048 = cirrus clouds
+  
+  // when compared w/ NIR composite:
+  // classifies clouds moderately well
+  // useful for cloud masking purposes
+  
+  // more on clouds in chapter F4.3 :)
+
+/* Section 6: Metadata */
+
+  // aside from band imagery & pixel quality flags
+  // GEE also allows access to image metadata
+  // easily printed to console per image
+  
+  // examine metadata for Sentinel-2 MSI
+print('MSI Image Metadata', msiImage);
+
+  // expected output: data type, id, band list
+  // and properties (1st = cloudy pixel %)
+  // cloudy_px_%: image-lvl assessment of cloudiness
+  // vs. per-pixel cloud mask in QA60 band
+  
+  // aside from viewing it w/in sea of metadata
+  // it can also be printed on its own
+  // can also record list of cloudiness values
+  // within a given image collection
+  
+  // metadata properties can be extracted from image
+  // using the get() function, then print to console
+
+  // e.g. get cloudiness value for msiImage
+  // then print to console
+var msiCloudiness = msiImage.get('CLOUDY_PIXEL_PERCENTAGE');
+print('MSI Cloudiness: ', msiCloudiness);
+
+  // expected output: single value (cloudiness %)
+  
+/* Section 7: SYNTHESIS */
+
+  // 1) create plot of specrtal resolution
+  // for one of other sensors in this chapter
+  // band names? corresponding wavelengths?
+  
+  // example: NAIP image
+var optionsNAIP = {
+    title: 'NAIP spectrum at SFO',
+    hAxis: {title: 'Band'},
+    vAxis: {title: 'Reflectance'},
+    legend: {position: 'none'},
+    pointSize: 3
+};
+  
+var naipChart = ui.Chart.image.regions({
+    image: naipImage,
+    regions: sfoPoint
+}).setOptions(optionsNAIP);
+print(naipChart);
+
+  // expected output: 4 bands (B, G, N, R)
+  // aka blue, green, near-infrared, red
+  
+  // 2) set following variables to the scales
+  // of the corresponding bands
+
+  // example: MODIS B01
+var modisB01Scale = modisImage
+    .select('sur_refl_b01')
+    .projection()
+    .nominalScale();
+print('Modis B01 scale: ', modisB01Scale);
+
+  // example 2: MSI B5
+var msiB5Scale = msiImage
+    .select('B5')
+    .projection()
+    .nominalScale();
+print('MSI B5 scale: ', msiB5Scale);
+
+  // example 3: NAIP R
+var naipRScale = naipImage
+    .select('R')
+    .projection()
+    .nominalScale();
+print('NAIP Red Scale: ', naipRScale);
+  
+  // 3) count no. of MYD09A1 & MSI images
+  // in specified point geometry
+  // then save to corresponding variables
+var testPoint = ee.Geometry.Point([-122.30144, 37.80215]);
+
+  // count MYD09A1 images
+var mod09ImageCount = mod09
+    .filterBounds(testPoint)
+    .filterDate('2017-01-01', '2017-12-31')
+    .size();
+print('MYD09A1 Image Count in Point: ',
+  mod09ImageCount);
+  
+  // count MSI images
+var msiImageCount = msi
+    .filterBounds(testPoint)
+    .filterDate('2017-01-01', '2017-12-31')
+    .size();
+print('MSI Image Count in Point: ',
+  msiImageCount);
+  
+  // answer: use size() method to get no. of
+  // elements (e.g. images) in collection
+  
+  // SUMMARY
+  // get scale: .select('band').projection().nominalScale
+  // get tempr: ui.Chart.image.series (x-axis: img date)
+  // get specr: ui.Chart.image.regions (x-axis: bands)
+  // get pxqual: add quality flag layer to map
+  // get properties: print for all, .get() for specific

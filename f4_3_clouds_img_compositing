@@ -1,0 +1,601 @@
+/* Chapter F4.3: Clouds and Image Compositing */
+
+  // in this chap: show different methods in
+  // creating image composites via quality flags
+  // using example of removing cloud cover
+  
+  // we will 1) examine diff filtering options
+  // show one approach for cloud masking, and
+  // show other ways for composite creation
+  
+  // pixel selection for composite creation
+  // can exclude unwanted pixels (e.g. cloud,
+  // shadow, smoke) or select pixels based on
+  // proximity to target date or sensor type
+  
+  // sat RS ideal data source for large areas
+  // however, cloud cover one of most common
+  // limitations of optical sensors in
+  // providing continuous time series data
+  // esp in tropical, polar, mountainous, or
+  // high-altitude areas -> clouds = common
+  
+  // clouds & cloud shadows reduce view of
+  // optical sensors, blocking spectral
+  // response from earth's surface (duh)
+  
+  // working w/ cloud-contaminated pixels can
+  // affect accuracy & info content of RS products
+  // e.g. LULC, veg modeling, change detection
+  // where clouds might be seen as false changes
+  // thus, CLOUD DETECTION ALGORITHMS critical
+  // to exclude cloud & shadows from analysis
+  
+  // dati, cloud algorithms derived info from 
+  // single date-imgs & sun-illumination geometry
+  // now, newer cloud algorithms based on
+  // analysis of Landsat time series
+  
+  // such algorithms indicate presence of
+  // clouds, cloud shadows, snow, smoke, etc.
+  // presence & extent of cloud cover in pixel
+  // is provided as ancillary data for Landsat
+  // and Sentinel-2 via px-lvl QUALITY FLAGS
+  
+  // flags also indicate other conditions, incl.
+  // radiometric saturation & terrain occlusion
+  // enabling assessment of usefulness & ease
+  // of including each pixel in subsq. analyses
+  // thus, flags help reduce manual supervision
+  // and maximize automatic processing methods
+  
+  // most automatic algorithms work best on
+  // imgs free from clouds & cloud shadows
+  // thus, img must have few data gaps as possible
+  // to seamlessly cover study area
+  
+  // IMG COMPOSITING techniques used to reduce
+  // impact of clouds & shadows, plus aerosols,
+  // view angle effects, data volumes, etc.
+  // for this, they use cloud detection algorithms
+  
+  // EPOCHAL IMG COMPOSITES made by using
+  // pxls from all imgs over period (szn, yr)
+  // help overcome limited availability 
+  // of cloud-free imagery in some areas
+  
+  // info from cloud masks & pixel flags guide
+  // creation of rules to RANK PIXEL QUALITY
+  // based on presence & distance to clouds etc
+  // higher score = less cloud cover & better
+  // acquisition date & sensor used
+  
+  // img compositing methods allow users to
+  // create imagery covering large areas vs
+  // being limited to analysis of single scenes
+  
+  // moreover, creating composites at regular
+  // intervals (e.g. annually) allows analysis
+  // of long time series over large aeras
+  // filling critical info need for monitoring
+  
+  // options for limiting cloud cover
+  // 1) simple median composite
+  // 2) cloud mask -> median composite
+    // can adjust duration to reduce gaps
+  // 3) include data from other satellites
+    // via merge() for image collections
+  // 4) GEE best available pixel (BAP) app
+  
+  // general workflow for creation of
+  // cloud-free image composite
+  
+  // 1) defining area of interest (AOI)
+  // 2) filtering img-coll to target params
+  // 3) applying sat-specific cloud mask
+  // 4) reducing img-coll to create composite
+  // 5) using GEE-BAP app to create annual
+    // best-available-pixel img composites
+    // bby globally combining multiple
+    // Landsat sensors and images
+
+/* Section 1: Cloud Filter & Cloud Mask */
+
+  // goal: create nationwide composite
+  // for colombia using large scale intl
+  // boundary (2017) dataset from US DoS
+  
+  // first step: define AOI & center map
+var country = ee.FeatureCollection(
+'USDOS/LSIB_SIMPLE/2017')
+    .filter(ee.Filter.eq('country_na', 'Mozambique'));
+
+  // center map, zoom=5 (zoomed out)
+Map.centerObject(country, 5);
+
+  // we start creating Landsat 8 composite
+  // start by defining startDate & endDate
+var startDate = '2019-01-01';
+var endDate = '2019-12-31';
+
+  // then filter collection by date & AOI
+  // year = 2019, AOI = colombia (country)
+var landsat8 = ee.ImageCollection(
+'LANDSAT/LC08/C02/T1_L2')
+    .filterBounds(country)
+    .filterDate(startDate, endDate);
+
+  // then use fxn to apply scaling factors
+  // to Landsat 8 bands
+function applyScaleFactors(image) {
+    var opticalBands = image
+        .select('SR_B.')
+        .multiply(0.0000275)
+        .add(-0.2);
+    var thermalBands = image
+        .select('ST_B.*')
+        .multiply(0.00341802)
+        .add(149.0);
+    return image
+        .addBands(opticalBands, null, true)
+        .addBands(thermalBands, null, true);
+}
+landsat8 = landsat8
+    .map(applyScaleFactors);
+    
+  // now we create composite using median()
+  // then clip to country borders (colombia)
+  // then add to map using vizParams
+var composite = landsat8
+    .median()
+    .clip(country);
+
+var vizParams = {
+    bands: ['SR_B4', 'SR_B3', 'SR_B2'],
+    min: 0,
+    max: 0.2
+};
+Map.addLayer(composite, vizParams,
+    'L8 Composite', 0);
+  
+  // output: cloudy, esp. in andes region (W)
+  // very hard to create hi-qual, cloud-free
+  // composites in tropical area w/o first
+  // filtering images for cloud cover
+  // even if img-coll is constrained to
+  // only imgs acquired during dry szn
+  
+  // thus, we filter img-coll CLOUD_COVER 
+  // param to avoid cloudy images (<50%)
+var landsat8FiltClouds = landsat8
+    .filterBounds(country)
+    .filterDate(startDate, endDate)
+    .filter(ee.Filter.lt('CLOUD_COVER', 50));
+  
+  // make composite from cloud-filtered imagery
+var compositeFiltClouds = landsat8FiltClouds
+    .median()
+    .clip(country);
+Map.addLayer(compositeFiltClouds, vizParams,
+    'L8 Composite Cloud-Filtered', 0);
+
+  // print size of collections to compare
+print('Landsat 8 No. of Images:', 
+    landsat8.size());
+print('Landsat 8 Cloud-Filtered No. of Images:',
+    landsat8FiltClouds.size());
+    
+  // output: less cloudy than non-filtered
+  // but still too cloudy for analysis
+  // cloud_cover filter --> 50% fewer imgs
+  
+  // try adjusting cloud_cover threshold
+  // to check impact on displayed map
+    // stricter threshold -> more img gaps
+    
+  // why gaps? persistent cloud cover
+  // in some regions of colombia (e.g. andes)
+  
+  // to deal w this, we can apply cloud mask
+  // using quality assessment (QA) band
+  // QA_PIXEL in Landsat 8, containing info
+  // on presence of atmospheric noise, and
+  // allows users to apply per-pixel filters
+  
+  // each pixel in QA band has unsigned integers
+  // represent bit-packed combos of
+  // surf, atmos, and sensor conditions
+  
+  // our cloud mask will also use QA_RADSAT band
+  // which indicates which bands are
+  // radiometrically saturated (sat'd=less info)
+  // pixel=1=saturated, so we mask those
+  
+  // we crete fxn to apply cloud mask to img
+  // then map fxn over Landsat 8 collection
+  // mask is applied via updateMask() fxn
+  // which removes undesired pixels from
+  // analysis by making them transparent
+  // undesired pixels = based on input mask
+function maskSrClouds(image) {
+    // bit 0 - fill
+    // bit 1 - dilated cloud
+    // bit 2 - cirrus
+    // bit 3 - cloud
+    // bit 4 - cloud shadow
+    var qaMask = image
+        .select('QA_PIXEL')
+        .bitwiseAnd(parseInt('11111', 2))
+        .eq(0);
+    var saturationMask = image
+        .select('QA_RADSAT')
+        .eq(0);
+    
+    return image
+        .updateMask(qaMask)
+        .updateMask(saturationMask);
+}
+
+  // detour: cos we are dealing w/ bits,
+  // we use bitwiseAnd & parseInt methods
+  // which help unpack bit info
+  
+  // bitwise AND: binary operation, takes
+  // 2 equal-length binary numbers, then
+  // performs logical AND operation
+  // per pair of corresponding bits
+  // AND: all 1 = 1, all 0 = 0, diff = 0
+  
+  // 1st binary no: 0 0 0 0 1 1
+  // 2nd binary no: 0 0 0 1 0 1
+  // resulting num: 0 0 0 0 0 1
+  
+  // parseInt: parses string object ('11111')
+  // then return interger in specified base (2)
+
+  // apply cloud mask to collection
+var landsat8FiltMasked = landsat8FiltClouds
+    .map(maskSrClouds);
+
+  // create the composite
+  // from cloud-masked collection
+var landsat8CompMasked = landsat8FiltMasked
+    .median()
+    .clip(country);
+Map.addLayer(landsat8CompMasked, vizParams,
+    'L8 Composite Cloud-Masked');
+  
+  // output: missing pixels = persistent clouds
+  // but sees more land than previous composites
+  // why? when compositing (taking median),
+  // di na kasama cloudy pixels in operation
+  // hence, if may median, fosho ground sya
+  
+  // however, minsan, cloud cover = persistent
+  // so pixels for ALL images are masked out
+  // if compositing period not a major issue,
+  // can increase duration to mitigate data gaps
+  
+  // change startDate to 2018-01-01
+  // to include images taken 2018-2019
+  // this whill have less data gaps
+  
+  // other method is to have series of rules
+  // that allow selecting pixels for
+  // specific years (na walang cloud cover?)
+  // but thats later in section 3
+  
+/* Section 2: Incorporating Data 
+   From Other Satellites */
+   
+  // another option to reduce data gaps
+  // in imagery over cloudy areas is to
+  // include imagery from other sensors
+  // acquired during time period of interest
+  
+  // Landsat collection spans many missions
+  // continuously acquiring data since 1972
+  // now, we include Landsat 7 imgs from 2019
+  // to fill gaps in 2019 Landsat 8 composite
+  
+  // making landsat 7 composite = same steps:
+  // 1) import landsat 7 & define scaling fxn
+  // remember: scaling = sensor-specific
+var landsat7 = ee.ImageCollection(
+'LANDSAT/LE07/C02/T1_L2');
+
+function applyScaleFactorsL7(image) {
+    var opticalBands = image
+        .select('SR_B.')
+        .multiply(0.0000275)
+        .add(-0.2);
+    var thermalBands = image
+        .select('ST_B6')
+        .multiply(0.00341802)
+        .add(149.0);
+    return image
+        .addBands(opticalBands, null, true)
+        .addBands(thermalBands, null, true);
+}
+
+  // 2) filter img-coll, apply mask & scaling
+  // we will use same cloud mask fxn as above
+var landsat7FiltMasked = landsat7
+    .filterBounds(country)
+    .filterDate(startDate, endDate)
+    .filter(ee.Filter.lt('CLOUD_COVER', 50))
+    .map(maskSrClouds)
+    .map(applyScaleFactorsL7);
+
+  // 3) finally create median composite
+var landsat7CompMasked = landsat7FiltMasked
+    .median()
+    .clip(country);
+Map.addLayer(landsat7CompMasked, {
+    bands: ['SR_B3', 'SR_B2', 'SR_B1'],
+    min: 0, // RGB: L8=432, L7=321
+    max: 0.2
+}, 'L7 Composite Cloud-Masked', 0);
+
+  // output: img w/ systematic gaps; why?
+  // cos since 2003, Landsat 7 sensor has
+  // scan line corrector (SLC) failure
+  
+  // w/o SLC, sensor's line of sight makes
+  // zig-zag pattern along sat ground track
+  // so some areas duplicated, others missed
+  // after lvl 1 processing, duplicated areas
+  // are removed, leaving data gaps in place
+  
+  // more info on L7 SLC error in USGS page
+  // anw, L7 data still usable even w/ SLC error
+  // so now we combine L7 and L8
+  
+  // since L7 and L8 have diff band numbers,
+  // first we define fxn to rename L7 bands
+  // to match L8 band numbers, then apply fxn
+function renameBands(image) {
+    return image.select(
+        ['SR_B1', 'SR_B2', 'SR_B3', 
+         'SR_B4', 'SR_B5', 'SR_B7',],
+        ['SR_B2', 'SR_B3', 'SR_B4', 
+         'SR_B5', 'SR_B6', 'SR_B7']);
+}
+var landsat7FiltMaskedRenamed =
+landsat7FiltMasked.map(renameBands);
+
+  // print 1st imgs of both collections
+  // to inspect if renameBands is correct
+print('L7 Collection First Image', 
+    landsat7FiltMasked.first());
+print('L7 Collection Renamed First Image', 
+    landsat7FiltMaskedRenamed.first());
+    
+  // now we merge L7 & L8 via merge()
+  // then mapping fxn over L7 to cast
+  // as float32 using toFloat()
+  
+  // to merge img-colls, number & names
+  // of bands must be same for both
+  // so we use select() on L8 to specify
+  // same 6 bands present in L7-renamed
+  // w/o selecting, error will occur
+  // cos we merge 6-band L7 to 19-band L8
+  
+  // merge L7 & L8 collections
+var landsat78 = landsat7FiltMaskedRenamed
+    .merge(landsat8FiltMasked
+        .select(['SR_B2', 'SR_B3', 'SR_B4', 
+        'SR_B5', 'SR_B6', 'SR_B7']))
+    .map(function(img){
+        return img.toFloat();
+    });
+print('Merged Collections', landsat78);
+    
+  // output: collection of ~1000 imgs
+  // next, we take median composite
+  // of this new merged collection
+var landsat78composite = landsat78
+    .median()
+    .clip(country);
+Map.addLayer(landsat78composite, vizParams,
+    'L7 and L8 Median Composite');
+    
+  // output: less data gaps in merged coll
+  // vs. L8-only cloud-masked composite
+  // but data gaps still present due to
+  // persistent cloud cover in andes, and
+  // SLC-off data due to L7 SLC error
+  
+/* Section 3: Best-Available-Pixel (BAP) 
+   Compositing via a GEE Application */
+  
+  // in this sec: a GEE app that allows
+  // creation of annual best-available-pixel
+  // or BAP image composites by combining
+  // multiple Landsat sensors and images
+  
+  // annual BAP img compsites created by
+  // choosing optimal observations per pixel
+  // from all available L5 TM, L7 ETM+, and
+  // L8 OLI imagery per given yr, and
+  // w/in given day range from specified
+  // acquisition day of yr, + other constraints
+  
+  // Landsat data in GEE is from USGS archive
+  // Landsat images are corrected to SR values
+  
+  // as per White et al. (2014), a series of
+  // scoring fxns ranks each pixel observation by:
+  // 1) acquisition day of year
+  // 2) cloud cover in scene
+  // 3) distance to clouds & cloud shadows
+  // 4) presence of haze, and
+  // 5) acquisition sensor
+  
+  // further info regarding BAP
+  // BAP compositing method - Griffiths et al. (2013)
+  // tuning paramters - White et al. (2014)
+  
+  // to acess GEE-BAP interface & its fxns
+  // check code checkpoint F43c, then go to
+  // https://code.earthengine.google.com/?accept_repo=users/sfrancini/bap
+  // which creates a repository in reader section
+  // open ui script then run to open BAP UI
+  
+  // GEE-BAP UI is divided into 3 sections
+  
+  // A) input/output options
+    // users specify:
+    // 1) study area
+        // 3 options to select study area
+      // a) draw study area (shape/rectangle)
+      // b) upload image template (to match
+        // projection, pixel size, and extent)
+      // c) work globally (generates BAP
+        // composites for whole globe)
+        // data download not available for this
+    // 2) time period (start & end date)
+      // multiple yearly composites created
+    // 3) path to store results
+      // saved to GDrive folder via Tasks tab
+      // results in tiled, TIFF format
+      // w/ extra CSV file of params used
+  
+  // B) pixel scoring options
+    // 1) acquisition day of year & date of range
+      // closer to define date = higher score
+      // outside range = excluded from composite
+    // 2) max cloud cover
+      // above max cover = excluded
+    // 3) distance to clouds & shadows
+      // 1 in bits 3 & 4 in QA_PIXEL = excluded
+      // nearer to masked pixels = lower score
+    // 4) atmospheric opacity (haziness)
+      // above max opacity = excluded
+      // below min opacity = max score
+      // between min & max = score based on fxn
+      // available only for L5 & L7
+    // 5) L7 ETM+ SCL-off penalty (score fxn)
+      // lower score for post-2003 L7 images
+      // to ensure stripe-less L5 & L8 data
+      // is prioritized over striped L7 data
+      // and avoid inclusion of data gaps in imgs
+      // larger score = less likely inclusion
+      // penalty score = 1 = totally excluded
+  // C) advanced parameters
+    // default bands: visible (RGB)
+    // spectral index option enables user to
+    // produce selected spectral indices
+    // from resulting BAP img composites
+    // e.g. NDVI, EVI, NBR, TCA bands, etc
+    // other params: de-spiking, in-filling
+  
+  // GEE-BAP fxns can be accessed in-code tho
+  // ff code sets scoring parameter values
+var targetDay = '06-01';
+var daysRange = 75;
+var cloudsTh = 70;
+var SLCoffPenalty = 0.7;
+var opacityScoreMin = 0.2;
+var opacityScoreMax = 0.3;
+var cloudDistMax = 1500;
+var despikeTh = 0.65;
+var despikeNbands = 3;
+var startYear = 2015;
+var endYear = 2017
+  
+  // defines study area...
+var worldCountries = ee.FeatureCollection(
+'USDOS/LSIB_SIMPLE/2017');
+var colombia = worldCountries
+    .filter(ee.Filter.eq(
+        'country_na', 'Colombia'));
+
+  // loads BAP library...
+var library = require('users/sfrancini/bap:library');
+
+  // calculate best-available-pixel
+  // aka BAP composite
+var BAPCS = library.BAP(
+    null,
+    targetDay,
+    daysRange,
+    cloudsTh,
+    SLCoffPenalty,
+    opacityScoreMin,
+    opacityScoreMax,
+    cloudDistMax
+);
+
+  // despike collection
+BAPCS = library.despikeCollection(
+    despikeTh,
+    despikeNbands,
+    BAPCS,
+    1984,
+    2021,
+    true
+);
+
+  // infill data gaps
+BAPCS = library.infill(
+    BAPCS,
+    1984,
+    2021,
+    false,
+    true
+);
+
+  // then creates & displays composite results
+// Map.centerObject(colombia, 5);
+// library.ShowCollection(
+//     BAPCS,
+//     startYear,
+//     endYear,
+//     colombia,
+//     false,
+//     null
+// );
+// library.AddSLider(
+//     startYear, 
+//     endYear
+// );
+
+  // output: may clouds parin nmn...
+  // tas ambagal pa mag-calculate
+  // probs will never use this again
+  
+/* Section 4: SYNTHESIS */
+
+  // 1) create composites for other cloudy
+  // regions or less cloudy regions, e.g.
+  // cambodia or mozambique, then examine
+  // are there more/less gaps? try to
+  // change acquisition day & day range
+  // to see if mag-iimprove pa
+    // cambodia: cloud-free, better if
+    // L8 cloud-masked lng vs. merged w L7
+    // mozambique: same as cambodia
+    // tbh BAP is too slow for its worth
+    
+  // not gonna do the other items
+  // cos they make use of BAP
+  // and idw deal w that again
+  
+  // CONCLUSION: image compositing algorithms
+  // provide robust & transparent tools to
+  // address issues w clouds & other atmospheric
+  // disturbances in satellite RS imagery
+  // expanding data availability for RS uses
+  
+  // tools described in this chapter should
+  // give us some useful strategies to aid
+  // in limiting cloud cover in our RS data
+  
+  // note that output img quality is a fxn
+  // of cloud masking routine quality
+  // tuning/optimization of compositing params
+  // is recommended to ensure best capture of
+  // physical conditions in area of interest
+  // esp as each area has its own trends :)

@@ -1,0 +1,392 @@
+/* Chapter F2.0: Image Manipulation:
+   Bands, Arithmetic, Thresholds, and Masks */
+
+  // recall: diff. surfaces reflect diff. amounts of
+  // EM energy at diff. wavelengths (e.g. plants vs. soil)
+  // most easily seen in spectral signature charts
+  
+  // spectral indices: show how objects reflect EM
+  // in diff. parts of spectrum IN SINGLE NUMMBER
+  // combining multiple bands arithmetically
+  // to help distinguish diff. types of land cover
+  
+  // spectral indices = the bases of many RS analyses
+  // many uses (e.g. R-NIR ratio in crop monitoring)
+
+/* Section 1: Band Arithmetic in GEE */
+
+  // many indices calculable via band arithmetic in GEE
+  // band arithmetic: math operations on bands (+, -, *, /)
+  // can be done manually or in more efficient ways
+  
+  // 1) NDVI: (NIR - R)/(NIR + R) (for vegetation)
+  // R & NIR bands tell much abt vegetation cos of
+  // their high reflectance in NIR & low ref. in R
+  
+  // NDVI devised after launch of Landsat 1
+  // robust single value denoting vegetation health
+  // along scale of -1 to 1 for any unit of brightness
+  
+  // NDVI = normalized difference vegetation index
+  // norm. diff: numerator = diff.; denominator = normalizer
+  // dense veg. = 0.8-0.9; no veg. = 0; water = -1
+  
+  // cloud-based band arithmetic: a strength of GEE
+  // operations are quick, even on planetary-scale
+  // GEE spreads calculations across many servers
+  
+  // example: calculate NDVI in SF using Sentinel-2
+  // import & filter imagery by location & date
+var sfoPoint = ee.Geometry.Point(-122.3774, 37.6194);
+var sfoImage = ee.ImageCollection('COPERNICUS/S2')
+    .filterBounds(sfoPoint)
+    .filterDate('2020-02-01', '2020-04-01')
+    .first();
+
+  // display image as false color composite
+// Map.centerObject(sfoImage, 11);
+Map.addLayer(sfoImage, {
+    bands: ['B8', 'B4', 'B3'],
+    min: 0,
+    max: 2000
+}, 'False-Color', 0);
+
+  // simplest math operations in Earth Engine:
+  // add(), subtract(), multiply(), divide()
+  // select NIR & R bands > use math to get NDVI
+  
+  // extract NIR & R bands from images
+var nir = sfoImage.select('B8');
+var red = sfoImage.select('B4');
+
+  // calculate numerator & denominator using
+  // subtraction & addition respectively
+var numerator = nir.subtract(red);
+var denominator = nir.add(red);
+
+  // now calculate NDVI
+var ndvi = numerator.divide(denominator)
+           .rename('NDVI');
+
+  // add layer to map with a palette
+var vegPalette = ['red', 'white', 'green'];
+Map.addLayer(ndvi, {
+    min: -1,
+    max: 1,
+    palette: vegPalette
+}, 'NDVI Manual', 0);
+
+  // expected output: green = heavy vegetation
+  // white = built-up (no veg.); red = water
+
+  // using simple arithmetic operations
+  // almost any index can be built in GEE
+  
+  // normalized differences so common in RS that
+  // GEE has method to do whole calc. in 1 step:
+  // the normalizedDifference() method
+  // creates norm. diff. of 2 specified bands
+  
+  // now use built-in normalizedDifference()
+  // function to achieve same calculation
+var ndviND = sfoImage.normalizedDifference(['B8', 'B4']);
+Map.addLayer(ndviND, {
+    min: -1,
+    max: 1,
+    palette: vegPalette
+}, 'NDVI Normalized Difference', 0);
+
+  // expected output: same as NDVI manual
+
+  // some rules for normalizedDifference():
+    // 1) input is a list of 2 band names
+    // if not specified, uses 1st 2 bands of image
+    // 2) negative input values masked
+    // 3) image properties not retained
+    // 4) output image band name is 'nd'
+    
+  // normalizedDifference() used for many indices
+  // example: NDWI (norm. diff. water index)
+  
+  // made by Gao (1996) as index of veg. water content
+  // sensitive to changes in liquid content of canopies
+  // used to detect drought conditions or irrigation lvls
+  // sometimes also known as ND moisture index (NDMI)
+  
+  // NDWI = (NIR - SWIR)/(NIR + SWIR)
+  // recall: in Sentinel-2, NIR = B8, SWIR = B11
+  
+  // use normalizedDifference() to calculate NDWI
+var ndwi = sfoImage.normalizedDifference(['B8', 'B11']);
+var waterPalette = ['yellow', 'white', 'blue'];
+    // default palette: white -> blue
+Map.addLayer(ndwi, {
+    min: -1, // default: -0.5
+    max: 1,
+    palette: waterPalette
+}, 'NDWI', 0);
+
+  // expected output: blue = water, vegetation w/
+  // higher water content; white = drier
+  // e.g. built-up, less vegetated, etc.
+  
+/* Section 2: Thresholding, Masking, Remapping */
+
+  // using band arithmetic in image manipulation
+  // created new continuous values by combining bands
+  // now, we use logical operators to partition
+  // band or index values to create CATEGORIZED image
+  
+  // implementing THRESHOLDS: uses a threshold value
+  // and logical operators to partition image values
+  // e.g. NDVI > vegetation & no vegetation
+  
+  // simplifies image, but facilitates comprehension
+  // e.g. calculating forest cover % in a city
+  
+  // example: calculating forest cover in seattle
+  // create NDVI image of seattle using Sentinel-2
+var seaPoint = ee.Geometry.Point(-122.2040, 47.6221);
+var seaImage = ee.ImageCollection('COPERNICUS/S2')
+    .filterBounds(seaPoint)
+    .filterDate('2020-08-15', '2020-10-01')
+    .first();
+var seaNDVI = seaImage.normalizedDifference(['B8', 'B4']);
+  
+  // then map NDVI image
+// Map.centerObject(seaPoint, 10);
+var vegPalette = ['red', 'white', 'green'];
+Map.addLayer(seaNDVI, {
+    min: -1,
+    max: 1,
+    palette: vegPalette
+}, 'NDVI Seattle', 0);
+
+  // expected output: dark green = vegetated areas
+  // white = non-vegetated; pink = water
+  
+  // vegetated areas (parks, forests): NDVI > 0.5
+  // thus, threshold = 0.5 (veg. vs. non-veg.)
+  
+  // implement threshold = 0.5
+var seaVeg = seaNDVI.gt(0.5);
+
+  // boolean operators: true = 1, false = 0
+  // gt() = greater than; lt() = less than
+  // gte() = gt or equal to; lte() = lt or equal to
+  // eq() = equal to; neq() = not equal to
+  
+  // Map the threshold
+Map.addLayer(seaVeg, {
+    min: 0, // all pixels w/ NDVI <= 0.5 -> false
+    max: 1, // all pixels w/ NDVI > 0.5 -> true
+    palette: ['white', 'green']
+}, 'Forest vs. Non-Forest Seattle', 0);
+
+  // expected output: green = vegetated areas
+  // white = non-vegetated (built-up & water)
+  // no gradient between the two (either-or)
+
+  // simple thresholds -> binary classifications
+  // however, wanna split images into >2 groups?
+  // GEE has WHERE() method that gives new values
+  // if orig. px values satisfy specified condition
+  
+  // analogous to if statement in Javascript or etc.
+  // but IF commands arent calculated on Google servers
+  // but in own browser, which is much less powerful
+  // so in GEE, use where() for conditional logic
+  
+  // example: split into forested, not-forested, water
+  // we use where() thresholds of -0.1 and 0.5
+  
+  // create starting image with all values = 1
+  // use clip to constrain size of new image
+  // using clip([image].geometry())
+var seaWhere = ee.Image(1)
+    .clip(seaNDVI.geometry());
+
+  // make all NDVI values < -0.1 equal to 0  
+  // make all NDVI values > 0.5 equal to 2
+seaWhere = seaWhere.where(seaNDVI.lte(-0.1), 0)
+           .where(seaNDVI.gte(0.5), 2);
+
+  // recall: orig. value of all pixels = 1
+  // so if pixel satisfies neither, it stays as 1
+  
+  // map our new 3-class categorical layer
+Map.addLayer(seaWhere, {
+    min: 0, // water
+    max: 2, // forested
+    palette: ['blue', 'white', 'green']
+}, 'Water, Non-Forest, Forest', 0);
+
+  // expected output: green = vegetated areas
+  // white = non-vegetated; blue = water
+  // no gradient between 3 groups
+  
+  // rules for using where() method
+    // 1) no need to make new variable every time
+    // where() is used; can also use multiple where()
+    // clauses w/ diff. outputs in 1 statement
+    
+    // 2) can combine multiple conditions in 1 where()
+    // clause using and() or or() (a la SQL)
+    // e.g. defining upper & lower bounds for a class
+  
+  // MASKING: removes specific areas of an image
+  // (areas covered by a specified mask)
+  // from being displayed or analyzed
+  // GEE allows viewing current mask & updating it
+  
+  // how masking works: layer value * mask value
+  // mask values: 1 = included, 0 = masked out
+  // so layer value * 0 = 0 = masked out
+  
+  // example: view seaVeg layer's current mask
+// Map.centerObject(seaPoint, 9);
+Map.addLayer(seaVeg.mask(), {}, 'seaVeg Mask', 0);
+
+  // expected output: white = 1 = extent of seaVeg
+  // black = masked = areas outside seaVeg
+
+  // what if we want to exclude non-forested areas
+  // and analyze only forested areas?
+  
+  // we can create a binary mask using eq() method
+  // where 1 = true, 0 = false
+  // then use it to updateMask() the layer of interest
+
+  // create binary mask of non-forest
+  // 1 = forest, anyth else = non-forest
+var vegMask = seaVeg.eq(1);
+
+  // if pixel != 1, it is masked out (not shown)
+  // if  updateMask() is used to add values to existing mask
+var maskedVeg = seaVeg.updateMask(vegMask);
+
+  // map updated veg layer
+Map.addLayer(maskedVeg, {
+    min: 0,
+    max: 1,
+    palette: ['green']
+}, 'Masked Forest Layer', 0);
+
+  // expected output: forested layer on top
+  // basemap in bottom (non-forested = masked out)
+  
+  // map the updated mask
+Map.addLayer(maskedVeg.mask(), 
+    {}, 'maskedVeg Mask', 0);
+
+  // expected output: white = extent of maskedVeg
+  // black = masked out = non-forested areas
+  
+  // REMAPPING: takes specific values in image
+  // and assigns them a different value
+  // useful for categorical datasets
+  
+  // example: use remap() to change values of seaWhere layer
+  // since middle value is largest, palette is adjusted
+var seaRemap = seaWhere.remap([0, 1, 2], // existing values
+    [9, 11, 10]); // remapped values
+    
+Map.addLayer(seaRemap, {
+    min: 9,
+    max: 11,
+    palette: ['blue', 'green', 'white']
+}, 'Remapped Values', 0);
+
+  // expected output: seaWhere = 2 -> seaRemap = 10
+  // think: reclassify layer in QGIS
+  
+  // rules in using remap() method
+    // 1) from: list of orig. values
+    // 2) to: list of new values to replace orig.
+    // 3) values not matched in 'from' = masked out
+    // 4) if band is unspecified, uses 1st band
+
+/* Section 3: SYNTHESIS */
+
+  // 1) calculate & display CMR at following point
+  // CMR (clay minerals ratio): a geological index
+  // highlighting soils containing clay & alunite
+  // which absorb radiation in SWIR portion of spectrum
+  // CMR = SWIR1 / SWIR2
+  
+  // create point geometry and center map around it
+var texasPoint = ee.Geometry.Point(-96.797, 32.777);
+// Map.centerObject(texasPoint, 9);
+
+  // filter Sentinel-2 image to point
+var texasImage = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+    .filterBounds(texasPoint)
+    .filterDate('2020-06-01', '2020-08-31')
+    .first();
+
+  // extract SWIR1 (B6) and SWIR2 (B7) bands
+  // from Landsat 8 image
+var swir1Tex = texasImage.select('SR_B6');
+var swir2Tex = texasImage.select('SR_B7');
+
+  // use divide() method to calculate CMR
+var cmrTex = swir1Tex.divide(swir2Tex);
+
+  // add texas CMR layer to map
+Map.addLayer(cmrTex, {
+    min: 1,
+    max: 1.3,
+    palette: ['white', 'red']
+}, 'Texas CMR');
+
+  // filter Landsat-8 image around las vegas
+var lavPoint = ee.Geometry.Point(-115.139, 36.172);
+var lavImage = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+    .filterBounds(lavPoint)
+    .filterDate('2020-06-01', '2020-08-31')
+    .first();
+
+  // extract SWIR1 and SWIR2 bands from
+  // Sentinel-2 image over seattle
+var swir1Lav = lavImage.select('SR_B6');
+var swir2Lav = lavImage.select('SR_B7');
+
+  // use divide() method to calculate CMR for seattle
+var cmrLav = swir1Lav.divide(swir2Lav);
+Map.addLayer(cmrLav, {
+    min: 1,
+    max: 1.3,
+    palette: ['white', 'red']
+}, 'Las Vegas CMR');
+
+  // expected output: texas area redder than tacoma
+
+  // 2) IOR (iron oxide ratio): red / blue
+  // used to detect iron-bearing sulfide rocks
+var redTac = tacImage.select('SR_B4');
+var blueTac = tacImage.select('SR_B2');
+var iorTac = redTac.divide(blueTac);
+Map.addLayer(iorTac, {
+    min: 0.8,
+    max: 1.2,
+    palette: ['white', 'red']
+}, 'Tacoma IOR', 0);
+
+  // 3) NDBI (ND built-up index): (SWIR-NIR)/(SWIR+NIR)
+  // made by Zha et al (2003) to detect urban areas
+  // cos impervious surfaces reflect SWIR strongly
+var ndbi = sfoImage.normalizedDifference(['B11', 'B8']);
+
+  // bonus: NDBI is negative of NDWI
+  // so we can use reverse() to use same palette
+  // for NDWI, but colors are in reverse
+var barePalette = waterPalette.reverse();
+
+// Map.centerObject(ndbi, 9);
+Map.addLayer(ndbi, {
+    min: -1,
+    max: 1,
+    palette: barePalette
+}, 'SFO NDBI', 0);
+
+  // expected output: blue = water, white = built-up
